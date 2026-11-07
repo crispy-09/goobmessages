@@ -2,6 +2,12 @@
 
 # Goob Message
 
+
+This was made completely by Claude. I have absolutely NO idea what I'm doing, 
+I just wanted a client for google messages on desktop because Google doesn't provide one.
+Probably wont update because the current version works fine, feel free to fork :D
+
+
 *(Repo/target name: GMessagesMac.)*
 
 A **native SwiftUI macOS client for Google Messages**, designed to feel like Apple's Messages. It speaks Google's
