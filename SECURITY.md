@@ -10,8 +10,10 @@ into issues. We'll acknowledge within a few days.
 |---|---|---|
 | Google session cookies, tachyon token, pairing keys | macOS Keychain (`WhenUnlockedThisDeviceOnly`) | Never written to disk elsewhere, never synced to iCloud. |
 | Messages, contacts, images | Memory only | Nothing is cached to disk. Temporary media for the video/audio player is deleted when the viewer closes. |
-| Preferences (`linkPreviews`) | UserDefaults | No personal data. |
+| Preferences (notifications, link previews, menu bar…) | UserDefaults | No personal data. "Hide Alerts" stores opaque conversation IDs only (no names or numbers). |
 | Drafts | Memory only | Lost on quit. |
+| Voice recordings | Private temp file while recording | Read into memory and deleted as soon as you send or discard. |
+| Shared / played media | Private temp files (`gmm-*`, mode 0600) | Created only for Share… and the video viewer; deleted when the viewer closes and purged at every launch. Inline audio plays from memory. |
 
 The app talks only to Google endpoints (`*.google.com`, `*.googleapis.com`, `*.clients6.google.com`, Google-hosted
 avatar/media URLs) plus **link-preview fetches for URLs inside messages** (toggle in Settings; https public hosts only,
@@ -22,6 +24,9 @@ private/localhost/LAN addresses are refused).
 * The Google login happens in a non-persistent `WKWebView`; cookies are copied out and the web view's store is discarded.
   The app never sees your password.
 * Link previews reveal your IP to the linked site (like iMessage). Disable in Settings if that matters.
+* Notifications may show message text on the lock screen / Notification Center; turn off previews in Settings →
+  Notifications if that matters. Replies typed in a notification are sent exactly like messages typed in the app.
+* The microphone is only opened while the record button is active (macOS shows its orange indicator).
 * The protocol is reverse-engineered; a malicious or compromised phone/Google could send malformed protobuf. Parsing
   is done with swift-protobuf and a bounds-checked pblite reader, but fuzzing is welcome.
 * Release builds are ad-hoc signed unless you provide a Developer ID. Verify what you download or build it yourself.

@@ -32,7 +32,13 @@ Sources/GMessagesMac/
     GMClient+Pairing.swift  Google-account pairing: SignInGaia, UKEY2 handshake, emoji confirmation
     GMClient+API.swift  typed methods: conversations, messages, reactions, contacts, thumbnails, media
     Types.swift         typealiases, RPC enum raw-value constants, endpoints, config version/UA
-  Model/                Models.swift (view-model structs), AppModel.swift (@MainActor ObservableObject store)
+  Model/
+    AppModel.swift      @MainActor store + actions; connection supervision (sleep/wake/network); request batching
+    Models.swift        view-model structs (MessageVM, ConversationVM, …)
+    Notifications.swift NotificationPlanner (pure, tested) + NotificationCoordinator (buffering, posting, actions)
+    Preferences.swift   Prefs keys/defaults (UserDefaults) + LoginItem (SMAppService)
+    Attachments.swift   OutgoingAttachment + AttachmentPrep (MIME normalisation, HEIC→JPEG, size cap)
+    Audio.swift         VoiceRecorder (AAC .m4a, audio/mp4) + AudioPlayback (in-memory AVAudioPlayer)
   UI/                   SwiftUI views (RootView, MainView/sidebar, ChatView, bubbles, composer, viewers, settings)
 Tests/GMessagesMacTests/
 ```
@@ -63,6 +69,19 @@ Views never call `GMClient` directly; go through `AppModel`.
 10. SwiftUI's multi-line `TextField` misbehaves on macOS → composer uses `GrowingTextView` (NSTextView). Heights are
    measured from the font, never hardcoded.
 11. `GMConstants.configVersion` and the Chrome UA mirror libgm's current values; bump them when libgm does.
+12. **Never post one notification per incoming message.** Everything goes through `NotificationCoordinator.enqueue`,
+    which debounces, groups per conversation (identifier `conv.<id>` replaces the previous banner) and summarises during
+    catch-up. `isOld` from libgm is not enough on its own: after sleep the backlog can arrive as "new". Catch-up is
+    begun on launch/sleep/reconnect and ended 4 s after `.connected`; `NotificationPlanner.staleAfter` is the backstop.
+    Also skip alerts for updates to already-seen messages (reactions, status changes) via `rememberNotified`/`isLatest`.
+13. **Reconnects go through `AppModel.scheduleReconnect`** (debounced, single-flight; `GMClient.reconnect` is also
+    single-flight). Disconnect on `willSleep`, reconnect once on `didWake`; ignore network changes while asleep.
+    Don't add new reconnect triggers that bypass it, and keep retry loops on `GMClient.backoff` (exponential + jitter).
+14. **Rate limits:** batch participant thumbnails (`queueThumbnails`), de-duplicate `getConversation`
+    (`fetchingConversations`), debounce `markRead` per conversation, throttle full list refreshes (30 s). Prefer one RPC
+    with many IDs over many RPCs.
+15. Mic, notifications and login items need a real bundle → guard with `AppEnv.isBundled` / `AppEnv.canNotify`.
+    `make_app.sh` adds `NSMicrophoneUsageDescription`; hardened-runtime signing uses `Resources/GoobMessage.entitlements`.
 
 ## Conventions
 * Swift 5.9, macOS 13+. `GMClient` is an `actor`; UI state is `@MainActor`. No force-unwraps on network data.
@@ -76,6 +95,7 @@ Views never call `GMClient` directly; go through `AppModel`.
 * Add a unit test for every bug found in codecs/crypto (see `Tests/`).
 
 ## Ideas / known gaps
-Voice-note recording, stickers/GIF picker, sending location, scheduled send, in-conversation full-text search,
-persistent offline cache, pin/mute/archive verification against a real account (request shapes are untested upstream),
-inline notification replies, multi-account, localization, Sparkle-style updates.
+Stickers/GIF picker, sending location, scheduled send, server-side full-text search (find only searches loaded
+messages), persistent offline cache (deliberately absent: nothing is cached to disk), mute state can't be read back
+from the phone (hence local "Hide Alerts"), pin/mute/archive request shapes are untested upstream, multi-account,
+localization, Sparkle-style updates, dual-SIM picker.

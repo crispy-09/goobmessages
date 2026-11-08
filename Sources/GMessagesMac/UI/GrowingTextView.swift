@@ -109,8 +109,13 @@ final class SubmitTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
-        if isReturn, !event.modifierFlags.contains(.shift), !hasMarkedText() {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // "Send with Return" on: Return sends, Shift/Option-Return adds a line. Off: Return adds a line, ⌘Return sends.
+        let sends = Prefs.sendOnReturn ? mods.isDisjoint(with: [.shift, .option]) : mods.contains(.command)
+        if isReturn, sends, !hasMarkedText() {
             onSubmit?()
+        } else if isReturn, mods.contains(.option) || mods.contains(.shift) {
+            insertNewlineIgnoringFieldEditor(nil)
         } else {
             super.keyDown(with: event)
         }

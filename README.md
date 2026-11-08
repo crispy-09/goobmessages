@@ -17,11 +17,11 @@ client for the chat UI. Your phone stays the source of truth; this is a paired "
 > Unofficial. Uses an undocumented API that Google can change at any time. Use with your own account. See `NOTICE.md`.
 
 ## Features
-Conversations (inbox / archive), unread dots, pinned chats, group chats with group icons · send & receive SMS/RCS ·
-replies, reactions (long-press / hover menu), delete, copy · images, video, audio, files (view, play, save; paste,
-drag-drop, thumbnails) · link embeds · big-emoji messages · typing & read indicators · drafts · new conversation from
-contacts · archive/mute/delete · search · notifications + Dock badge · reconnect on wake/network change ·
-shortcuts (⌘N new, ⌘F search, ⌥⌘↑/↓ switch chats, ⌘R reload, ⌘, settings).
+- **Chats:** inbox / archive, unread dots, pinned chats, group chats with group icons (or a member-photo collage), new conversation from contacts, archive / delete, search, find in conversation (⌥⌘F).
+- **Messages:** send & receive SMS/RCS, replies, reactions (hover button, long-press or right-click), delete, copy, typing indicators, Delivered / Read, big-emoji messages, link previews, drafts per chat.
+- **Media:** photos, video, files: view, play, save, share; paste, drag-drop or **+** to attach (HEIC and other Mac-only image types are converted to JPEG). **Voice messages:** record with the mic button, play inline.
+- **Notifications:** reply or mark as read from the banner, one notification per conversation instead of one per message, a single summary for messages that arrived while your Mac was asleep, per-chat **Hide Alerts**, preview / sound settings.
+- **Mac niceties:** optional menu bar icon with unread chats, Open at Login, Dock badge, reconnects cleanly after sleep or a network change, shortcuts (⌘N new, ⌘F search, ⌥⌘F find, ⌥⌘↑/↓ switch chats, ⌘R reload, ⌘, settings).
 
 ## Build & run
 ```bash
@@ -37,7 +37,7 @@ swift test                    # optional
 ./scripts/make_dmg.sh         # -> build/GoobMessage.dmg
 cp -R "build/Goob Message.app" /Applications/
 ```
-First launch of an ad-hoc-signed app: right-click → **Open** (or run `xattr -dr com.apple.quarantine <app>`).
+First launch of an unsigned app: open it once, then System Settings → Privacy & Security → **Open Anyway** (or run `xattr -dr com.apple.quarantine "/Applications/Goob Message.app"`). Notifications, voice messages and Open at Login only work in this `.app`, not when run from Xcode.
 
 ## First run
 Click **Sign in with Google** → sign in with the account on your Android phone → keep Google Messages open on the phone

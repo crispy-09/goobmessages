@@ -2,9 +2,11 @@ import SwiftUI
 import AppKit
 import UserNotifications
 
-/// Notifications need a real .app bundle; a bare SwiftPM executable (Xcode's default run) crashes if it touches them.
 enum AppEnv {
-    static var canNotify: Bool { Bundle.main.bundleURL.pathExtension == "app" }
+    /// True when running as a real .app (built with scripts/make_app.sh). A bare SwiftPM executable (Xcode's default
+    /// run) has no bundle identity, and notifications, login items and microphone access crash or fail without one.
+    static var isBundled: Bool { Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.bundleIdentifier != nil }
+    static var canNotify: Bool { isBundled }
 }
 
 /// Closing the window hides it instead of destroying it, so a Dock click (or notification) can bring it back,
@@ -49,25 +51,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         NSApp.activate(ignoringOtherApps: true)
         if AppEnv.canNotify { UNUserNotificationCenter.current().delegate = self }
     }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         MainWindow.show()
         return true
     }
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent n: UNNotification) async -> UNNotificationPresentationOptions { [.banner, .sound] }
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive r: UNNotificationResponse) async {
-        if let id = r.notification.request.content.userInfo["conversationID"] as? String {
-            await MainActor.run { NotificationCenter.default.post(name: .openConversation, object: id); MainWindow.show() }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent n: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+
+    /// Banner tapped, or one of its actions (Reply / Mark as Read) used.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        let action = response.actionIdentifier
+        let cid = response.notification.request.content.userInfo["conversationID"] as? String
+        let typed = (response as? UNTextInputNotificationResponse)?.userText
+        await MainActor.run {
+            let model = AppModel.shared
+            switch action {
+            case NotificationCoordinator.replyAction:
+                if let cid, let typed { Task { await model.replyFromNotification(conversationID: cid, text: typed) } }
+            case NotificationCoordinator.markReadAction:
+                if let cid { model.markConversationRead(cid) }
+            default:
+                if let cid { model.select(cid) }
+                MainWindow.show()
+            }
         }
     }
 }
 
-extension Notification.Name { static let openConversation = Notification.Name("openConversation") }
-
 @main
 struct GMessagesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @StateObject private var model = AppModel()
+    @StateObject private var model = AppModel.shared
+    @AppStorage(Prefs.Key.showMenuBarIcon) private var showMenuBarIcon = false
 
     var body: some Scene {
         WindowGroup("Goob Message") {
@@ -76,14 +96,11 @@ struct GMessagesApp: App {
                 .frame(minWidth: 760, minHeight: 520)
                 .background(WindowAccessor())
                 .task { await model.start() }
-                .onReceive(NotificationCenter.default.publisher(for: .openConversation)) { n in
-                    if let id = n.object as? String { model.select(id) }
-                }
         }
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("New Message") { NotificationCenter.default.post(name: .newMessage, object: nil) }
+                Button("New Message") { MainWindow.show(); NotificationCenter.default.post(name: .newMessage, object: nil) }
                     .keyboardShortcut("n")
             }
             CommandGroup(after: .windowArrangement) {
@@ -93,6 +110,12 @@ struct GMessagesApp: App {
                 Button("Previous Conversation") { model.selectAdjacent(-1) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
                 Button("Next Conversation") { model.selectAdjacent(1) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 Divider()
+                Button("Find in Conversation") { NotificationCenter.default.post(name: .findInConversation, object: nil) }
+                    .keyboardShortcut("f", modifiers: [.command, .option])
+                    .disabled(model.selectedID == nil)
+                Button("Mark All as Read") { model.markAllRead() }
+                    .disabled(model.unreadConversations.isEmpty)
+                Divider()
                 Button("Reload Conversations") { Task { await model.reload() } }.keyboardShortcut("r")
             }
             CommandGroup(after: .textEditing) {
@@ -100,11 +123,19 @@ struct GMessagesApp: App {
                     .keyboardShortcut("f")
             }
         }
+
         Settings { SettingsView().environmentObject(model) }
+
+        MenuBarExtra(isInserted: $showMenuBarIcon) {
+            MenuBarContent().environmentObject(model)
+        } label: {
+            MenuBarLabel().environmentObject(model)
+        }
     }
 }
 
 extension Notification.Name {
     static let newMessage = Notification.Name("newMessage")
     static let focusSearch = Notification.Name("focusSearch")
+    static let findInConversation = Notification.Name("findInConversation")
 }

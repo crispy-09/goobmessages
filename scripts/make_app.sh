@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="Goob Message"
 BUNDLE_ID="${BUNDLE_ID:-com.example.GMessagesMac}"   # change this if you publish your own build
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-1.1.0}"
 OUT="build/${APP_NAME}.app"
 
 echo "▶ Building (release, universal)…"
@@ -40,12 +40,14 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticTermination</key><false/>
+  <key>NSMicrophoneUsageDescription</key><string>Goob Message uses the microphone only while you record a voice message.</string>
 </dict></plist>
 PLIST
 
 echo "▶ Signing…"
 if [ -n "${SIGN_ID:-}" ]; then
-  codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$OUT"
+  # Hardened runtime needs an explicit entitlement for the microphone (voice messages).
+  codesign --force --options runtime --timestamp --entitlements Resources/GoobMessage.entitlements --sign "$SIGN_ID" "$OUT"
 else
   codesign --force --sign - "$OUT"
 fi

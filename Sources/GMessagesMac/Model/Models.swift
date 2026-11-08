@@ -44,6 +44,7 @@ struct MessageVM: Identifiable, Hashable {
     var replyToID: String
     var isTombstone: Bool
     var isLocal = false      // optimistic copy not yet confirmed by the phone
+    var pendingMediaCount = 0 // attachments still uploading on a local copy (used to match the phone's echo)
 
     init(_ m: GMMessage, myParticipantID: String) {
         id = m.messageID.isEmpty ? m.tmpID : m.messageID
@@ -85,11 +86,32 @@ struct MessageVM: Identifiable, Hashable {
         replyToID = m.hasReplyMessage ? m.replyMessage.messageID : ""
     }
 
-    init(localText: String, tmpID: String, conversationID: String, media: [MediaItem] = [], replyToID: String = "") {
+    init(localText: String, tmpID: String, conversationID: String, media: [MediaItem] = [], replyToID: String = "",
+         pendingMediaCount: Int = 0) {
         id = tmpID; self.tmpID = tmpID; self.conversationID = conversationID
         text = localText; subject = ""; isFromMe = true; senderName = ""; participantID = ""
         timestamp = Date(); state = .sending; self.media = media; reactions = []
         self.replyToID = replyToID; isTombstone = false; isLocal = true
+        self.pendingMediaCount = pendingMediaCount
+    }
+
+    /// One-line description for the sidebar, notifications and the menu bar.
+    var summaryText: String {
+        if !text.isEmpty { return text }
+        let count = max(media.count, pendingMediaCount)
+        guard let first = media.first else { return count > 1 ? "\(count) attachments" : "Attachment" }
+        if count > 1 { return "\(count) attachments" }
+        if first.isImage { return "📷 Photo" }
+        if first.isVideo { return "🎥 Video" }
+        if first.isAudio { return "🎤 Audio message" }
+        return "📎 " + (first.name.isEmpty ? "Attachment" : first.name)
+    }
+
+    /// Does this message from the phone confirm a local optimistic copy?
+    func confirms(_ local: MessageVM) -> Bool {
+        guard local.isLocal, isFromMe, local.conversationID == conversationID else { return false }
+        if !tmpID.isEmpty && tmpID == local.tmpID { return true }
+        return text == local.text && media.count == max(local.media.count, local.pendingMediaCount)
     }
 }
 

@@ -13,7 +13,10 @@ struct MainView: View {
             else { Text("No Conversation Selected").font(.title3).foregroundStyle(.tertiary).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if let b = model.banner {
+            if model.isOffline {
+                Label("You're offline. Messages will sync when you reconnect.", systemImage: "wifi.slash")
+                    .font(.callout).frame(maxWidth: .infinity).padding(6).background(Color.secondary.opacity(0.18))
+            } else if let b = model.banner {
                 Text(b).font(.callout).frame(maxWidth: .infinity).padding(6).background(.yellow.opacity(0.3))
             }
         }
@@ -27,6 +30,7 @@ struct SidebarView: View {
     @EnvironmentObject var model: AppModel
     @Binding var showNew: Bool
     @FocusState private var searchFocused: Bool
+    @State private var pendingDelete: ConversationVM?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,11 +57,16 @@ struct SidebarView: View {
                         .tag(c.id)
                         .listRowSeparator(.hidden)
                         .contextMenu {
-                            Button(c.archived ? "Unarchive" : "Archive") { model.setArchived(c, !c.archived) }
-                            Button("Mute") { model.setMuted(c, true) }
-                            Button("Unmute") { model.setMuted(c, false) }
+                            if c.unread { Button("Mark as Read") { model.markConversationRead(c.id) } }
+                            Button(model.alertsHidden(c) ? "Show Alerts" : "Hide Alerts") { model.setAlertsHidden(c, !model.alertsHidden(c)) }
                             Divider()
-                            Button("Delete…", role: .destructive) { model.deleteConversation(c) }
+                            Menu("On Your Phone") {
+                                Button("Mute Notifications") { model.setMuted(c, true) }
+                                Button("Unmute Notifications") { model.setMuted(c, false) }
+                            }
+                            Button(c.archived ? "Unarchive" : "Archive") { model.setArchived(c, !c.archived) }
+                            Divider()
+                            Button("Delete…", role: .destructive) { pendingDelete = c }
                         }
                         .onAppear { if c.id == model.filteredConversations.last?.id { Task { await model.loadMoreConversations() } } }
                 }
@@ -65,6 +74,13 @@ struct SidebarView: View {
             .listStyle(.sidebar)
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in searchFocused = true }
+        .confirmationDialog("Delete this conversation from your phone?",
+                            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { c in
+            Button("Delete", role: .destructive) { model.deleteConversation(c) }
+        } message: { _ in
+            Text("This deletes it in Google Messages on your phone too. It can't be undone.")
+        }
     }
 }
 
@@ -81,6 +97,7 @@ struct ConversationRow: View {
                 HStack {
                     Text(conversation.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                     if conversation.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    if model.alertsHidden(conversation) { Image(systemName: "bell.slash.fill").font(.system(size: 9)).foregroundStyle(.secondary) }
                     Spacer()
                     Text(conversation.timestamp.sidebarString).font(.system(size: 11)).foregroundStyle(selected ? .white.opacity(0.85) : .secondary)
                 }

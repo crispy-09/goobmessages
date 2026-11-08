@@ -86,31 +86,42 @@ struct MessageActionsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 2) {
-                ForEach(emojis, id: \.self) { e in
-                    Button {
-                        model.react(message, emoji: e, in: conversation)
-                        dismiss()
-                    } label: {
-                        Text(e).font(.system(size: 24)).padding(5)
-                            .background(Circle().fill(mine == e ? Theme.blue.opacity(0.3) : Color.clear))
-                    }.buttonStyle(.plain)
+            if !message.isLocal {
+                HStack(spacing: 2) {
+                    ForEach(emojis, id: \.self) { e in
+                        Button {
+                            model.react(message, emoji: e, in: conversation)
+                            dismiss()
+                        } label: {
+                            Text(e).font(.system(size: 24)).padding(5)
+                                .background(Circle().fill(mine == e ? Theme.blue.opacity(0.3) : Color.clear))
+                        }.buttonStyle(.plain)
+                    }
                 }
+                .padding(.horizontal, 8).padding(.vertical, 8)
+                Divider()
+                row("Reply", "arrowshape.turn.up.left") { model.replyingTo = message }
             }
-            .padding(.horizontal, 8).padding(.vertical, 8)
-            Divider()
-            row("Reply", "arrowshape.turn.up.left") { model.replyingTo = message }
             if !message.text.isEmpty {
                 row("Copy text", "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(message.text, forType: .string)
                 }
             }
-            if let m = message.media.first { row("Save attachment…", "square.and.arrow.down") { model.saveMedia(m) } }
+            if let m = message.media.first {
+                row("Save attachment…", "square.and.arrow.down") { model.saveMedia(m) }
+                row("Share attachment…", "square.and.arrow.up") {
+                    Task {
+                        guard let url = await model.temporaryFile(for: m) else { model.errorMessage = "Couldn't download the attachment."; return }
+                        SharePresenter.share(url)
+                    }
+                }
+            }
             if message.state == .failed { row("Try again", "arrow.clockwise") { model.retry(message, in: conversation) } }
             Divider()
             row("Delete", "trash", destructive: true) { model.delete(message) }
         }
+        .padding(.top, message.isLocal ? 6 : 0)
         .padding(.bottom, 6)
         .frame(width: 290)
     }

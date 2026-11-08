@@ -5,13 +5,32 @@ struct ChatView: View {
     @EnvironmentObject var model: AppModel
     let conversation: ConversationVM
 
+    @State private var findVisible = false
+    @State private var findText = ""
+    @State private var findIndex = 0
+    @FocusState private var findFocused: Bool
+
     private var list: [MessageVM] { model.messages[conversation.id] ?? [] }
     private var isTyping: Bool { (model.typing[conversation.id] ?? .distantPast) > Date() }
+
+    /// IDs of messages matching the find query, oldest first.
+    private var matches: [String] {
+        let q = findText.trimmingCharacters(in: .whitespaces)
+        guard findVisible, !q.isEmpty else { return [] }
+        return list.filter { $0.text.localizedCaseInsensitiveContains(q) || $0.subject.localizedCaseInsensitiveContains(q) }.map(\.id)
+    }
+
+    private var currentMatch: String? {
+        let m = matches
+        guard !m.isEmpty else { return nil }
+        return m[min(max(findIndex, 0), m.count - 1)]
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
+            if findVisible { findBar; Divider() }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
@@ -32,8 +51,9 @@ struct ChatView: View {
                                 || m.timestamp.timeIntervalSince(prev!.timestamp) > 120
                             MessageRow(message: m, conversation: conversation, showTail: lastInRun,
                                        showSender: conversation.isGroup && !m.isFromMe && firstInRun,
-                                       replyTarget: list.first { $0.id == m.replyToID },
-                                       isLastSent: m.isFromMe && list.last(where: { $0.isFromMe })?.id == m.id)
+                                       replyTarget: m.replyToID.isEmpty ? nil : list.first(where: { $0.id == m.replyToID }),
+                                       isLastSent: m.isFromMe && list.last(where: { $0.isFromMe })?.id == m.id,
+                                       highlighted: currentMatch == m.id)
                                 .id(m.id)
                                 .padding(.top, firstInRun ? 6 : 1)
                         }
@@ -42,23 +62,95 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                .onChange(of: list.last?.id) { _ in withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") } }
-                .onChange(of: isTyping) { _ in proxy.scrollTo("bottom") }
+                .onChange(of: list.last?.id) { _ in
+                    guard !findVisible else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") }
+                }
+                .onChange(of: isTyping) { typing in if typing && !findVisible { proxy.scrollTo("bottom") } }
+                .onChange(of: currentMatch) { id in
+                    guard let id else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+                }
                 .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { proxy.scrollTo("bottom") } }
                 .overlay { if model.loadingMessages && list.isEmpty { ProgressView() } }
             }
             ComposerView(conversation: conversation)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .findInConversation)) { _ in openFind() }
     }
 
     private var header: some View {
         VStack(spacing: 2) {
-            AvatarView(image: model.avatar(for: conversation), initials: conversation.initials, colorHex: conversation.colorHex, size: 36, symbol: conversation.isGroup ? "person.2.fill" : nil, collage: model.collage(for: conversation))
-            Text(conversation.name).font(.system(size: 11, weight: .medium))
-            if conversation.isGroup { Text("\(conversation.raw.participants.count) people").font(.system(size: 10)).foregroundStyle(.secondary) }
+            AvatarView(image: model.avatar(for: conversation), initials: conversation.initials, colorHex: conversation.colorHex,
+                       size: 36, symbol: conversation.isGroup ? "person.2.fill" : nil, collage: model.collage(for: conversation))
+            HStack(spacing: 4) {
+                Text(conversation.name).font(.system(size: 11, weight: .medium))
+                if model.alertsHidden(conversation) {
+                    Image(systemName: "bell.slash.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+            }
+            if conversation.isGroup {
+                Text("\(conversation.raw.participants.count) people").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 6)
+        .overlay(alignment: .trailing) {
+            HStack(spacing: 12) {
+                Button { openFind() } label: { Image(systemName: "magnifyingglass") }
+                    .buttonStyle(.plain).help("Find in Conversation (⌥⌘F)")
+                Button { model.setAlertsHidden(conversation, !model.alertsHidden(conversation)) } label: {
+                    Image(systemName: model.alertsHidden(conversation) ? "bell.slash" : "bell")
+                }
+                .buttonStyle(.plain)
+                .help(model.alertsHidden(conversation) ? "Show Alerts" : "Hide Alerts")
+            }
+            .font(.system(size: 14)).foregroundStyle(.secondary).padding(.trailing, 14)
+        }
         .background(.bar)
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Find in conversation", text: $findText)
+                .textFieldStyle(.plain)
+                .focused($findFocused)
+                .onSubmit { step(-1) }
+                .onChange(of: findText) { _ in findIndex = max(matches.count - 1, 0) }
+            if !findText.isEmpty {
+                Text(matches.isEmpty ? "No matches" : "\(min(findIndex, matches.count - 1) + 1) of \(matches.count)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Button { step(-1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.plain).disabled(matches.count < 2).help("Older match")
+            Button { step(1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.plain).disabled(matches.count < 2).help("Newer match")
+            if model.hasOlder(conversation.id) {
+                Button("Search Earlier") { Task { await model.loadOlder(conversation.id) } }
+                    .buttonStyle(.link).font(.system(size: 11))
+                    .help("Load older messages so they can be searched")
+            }
+            Button("Done") { closeFind() }.buttonStyle(.plain).foregroundStyle(Theme.blue)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 7)
+        .background(.bar)
+        .onExitCommand { closeFind() }
+    }
+
+    private func openFind() {
+        findVisible = true
+        DispatchQueue.main.async { findFocused = true }
+    }
+
+    private func closeFind() {
+        findVisible = false
+        findText = ""
+        findIndex = 0
+    }
+
+    /// -1 = older, +1 = newer, wrapping around.
+    private func step(_ delta: Int) {
+        let n = matches.count
+        guard n > 0 else { return }
+        findIndex = ((min(findIndex, n - 1) + delta) % n + n) % n
     }
 }
 
@@ -71,11 +163,12 @@ struct MessageRow: View {
     let showSender: Bool
     let replyTarget: MessageVM?
     let isLastSent: Bool
+    var highlighted = false
 
     private let tapbacks = ["❤️", "👍", "👎", "😂", "😮", "😢"]
     @State private var showActions = false
     @State private var hovering = false
-    @AppStorage("linkPreviews") private var linkPreviews = true
+    @AppStorage(Prefs.Key.linkPreviews) private var linkPreviews = true
 
     var body: some View {
         if message.isTombstone {
@@ -112,11 +205,12 @@ struct MessageRow: View {
     private var bubbleStack: some View {
         VStack(alignment: message.isFromMe ? .trailing : .leading, spacing: 3) {
             if let r = replyTarget {
-                Text(r.text.isEmpty ? "Attachment" : r.text).font(.system(size: 11)).lineLimit(2)
+                Text(r.summaryText).font(.system(size: 11)).lineLimit(2)
                     .foregroundStyle(.secondary).padding(.horizontal, 10).padding(.vertical, 5)
                     .background(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.4)))
             }
-            ForEach(message.media) { item in MediaView(item: item) }
+            if message.isLocal && message.pendingMediaCount > 0 { pendingAttachments }
+            ForEach(message.media) { item in MediaView(item: item, fromMe: message.isFromMe) }
             if emojiOnly {
                 Text(message.text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.system(size: 52))
             } else if !message.text.isEmpty || !message.subject.isEmpty {
@@ -133,6 +227,11 @@ struct MessageRow: View {
             }
             if linkPreviews, !emojiOnly, let url = firstURL { LinkCard(url: url) }
         }
+        .background {
+            if highlighted {
+                RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.yellow.opacity(0.35)).padding(-5)
+            }
+        }
         .overlay(alignment: message.isFromMe ? .topLeading : .topTrailing) { reactionBadges.offset(x: message.isFromMe ? -10 : 10, y: -10) }
         .padding(.top, message.reactions.isEmpty ? 0 : 8)
         .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 25) { showActions = true }
@@ -141,12 +240,33 @@ struct MessageRow: View {
             MessageActionsView(message: message, conversation: conversation) { showActions = false }.environmentObject(model)
         }
         .contextMenu {
-            Menu("Tapback") { ForEach(tapbacks, id: \.self) { e in Button(e) { model.react(message, emoji: e, in: conversation) } } }
-            Button("Reply") { model.replyingTo = message }
+            if !message.isLocal {
+                Menu("Tapback") { ForEach(tapbacks, id: \.self) { e in Button(e) { model.react(message, emoji: e, in: conversation) } } }
+                Button("Reply") { model.replyingTo = message }
+            }
             if !message.text.isEmpty { Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string) } }
             if message.state == .failed { Button("Try Again") { model.retry(message, in: conversation) } }
             Divider()
             Button("Delete", role: .destructive) { model.delete(message) }
+        }
+    }
+
+    /// Attachments of a message that is still uploading: show the local previews dimmed with a spinner.
+    @ViewBuilder private var pendingAttachments: some View {
+        let previews = model.localPreviews[message.tmpID] ?? []
+        if previews.isEmpty {
+            Label(message.pendingMediaCount == 1 ? "Sending attachment…" : "Sending \(message.pendingMediaCount) attachments…",
+                  systemImage: "paperclip")
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .padding(10).background(RoundedRectangle(cornerRadius: 14).fill(Color.secondary.opacity(0.18)))
+        } else {
+            ForEach(Array(previews.enumerated()), id: \.offset) { _, img in
+                Image(nsImage: img).resizable().scaledToFit()
+                    .frame(maxWidth: 260, maxHeight: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .opacity(message.state == .failed ? 1 : 0.6)
+                    .overlay { if message.state == .sending { ProgressView() } }
+            }
         }
     }
 
@@ -184,7 +304,10 @@ struct MessageRow: View {
     @ViewBuilder private var statusLine: some View {
         switch message.state {
         case .failed:
-            Label("Not Delivered", systemImage: "exclamationmark.circle.fill").font(.system(size: 11)).foregroundStyle(.red)
+            Button { model.retry(message, in: conversation) } label: {
+                Label("Not Delivered · Try Again", systemImage: "exclamationmark.circle.fill").font(.system(size: 11))
+            }
+            .buttonStyle(.plain).foregroundStyle(.red)
         case .sending where isLastSent:
             Text("Sending…").font(.system(size: 11)).foregroundStyle(.secondary)
         case .read where isLastSent:
@@ -214,28 +337,141 @@ struct MessageRow: View {
 struct MediaView: View {
     @EnvironmentObject var model: AppModel
     let item: MediaItem
+    var fromMe = false
+
     var body: some View {
-        Group {
-            if item.isImage || item.isVideo, let img = model.image(for: item) {
-                ZStack {
-                    Image(nsImage: img).resizable().scaledToFit()
-                    if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 40)).foregroundStyle(.white.opacity(0.9)) }
+        if item.isAudio {
+            AudioBubble(item: item, fromMe: fromMe)
+                .contextMenu {
+                    Button("Save…") { model.saveMedia(item) }
+                    Button("Share…") { share() }
                 }
-                .frame(maxWidth: 260, maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            } else if item.isImage || item.isVideo {
-                RoundedRectangle(cornerRadius: 18).fill(Color.secondary.opacity(0.2)).frame(width: 200, height: 140)
-                    .overlay(ProgressView())
-            } else {
-                HStack {
-                    Image(systemName: item.isAudio ? "waveform" : "doc.fill")
-                    Text(item.name.isEmpty ? "Attachment" : item.name).lineLimit(1)
+        } else {
+            Group {
+                if item.isImage || item.isVideo, let img = model.image(for: item) {
+                    ZStack {
+                        Image(nsImage: img).resizable().scaledToFit()
+                        if item.isVideo { Image(systemName: "play.circle.fill").font(.system(size: 40)).foregroundStyle(.white.opacity(0.9)) }
+                    }
+                    .frame(maxWidth: 260, maxHeight: 320).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                } else if item.isImage || item.isVideo {
+                    RoundedRectangle(cornerRadius: 18).fill(Color.secondary.opacity(0.2)).frame(width: 200, height: 140)
+                        .overlay(ProgressView())
+                } else {
+                    HStack {
+                        Image(systemName: "doc.fill")
+                        Text(item.name.isEmpty ? "Attachment" : item.name).lineLimit(1)
+                    }
+                    .padding(10).background(RoundedRectangle(cornerRadius: 14).fill(Color.secondary.opacity(0.18)))
                 }
-                .padding(10).background(RoundedRectangle(cornerRadius: 14).fill(Color.secondary.opacity(0.18)))
+            }
+            .onAppear { if item.isImage || item.isVideo { model.loadImage(item) } }
+            .onTapGesture { model.viewing = item }
+            .contextMenu {
+                Button("Open") { model.viewing = item }
+                Button("Save…") { model.saveMedia(item) }
+                Button("Share…") { share() }
             }
         }
-        .onAppear { if item.isImage || item.isVideo { model.loadImage(item) } }
-        .onTapGesture { model.viewing = item }
-        .contextMenu { Button("Save…") { model.saveMedia(item) } }
+    }
+
+    private func share() {
+        Task {
+            guard let url = await model.temporaryFile(for: item) else { model.errorMessage = "Couldn't download the attachment."; return }
+            SharePresenter.share(url)
+        }
+    }
+}
+
+/// Inline player for voice messages and other audio, like the Messages app.
+struct AudioBubble: View {
+    @EnvironmentObject var model: AppModel
+    @ObservedObject private var playback = AudioPlayback.shared
+    @Environment(\.colorScheme) var scheme
+    let item: MediaItem
+    let fromMe: Bool
+
+    private var isCurrent: Bool { playback.currentID == item.id }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button {
+                Task { if let err = await playback.toggle(item, model: model) { model.errorMessage = err } }
+            } label: {
+                ZStack {
+                    if playback.loadingID == item.id {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: isCurrent && playback.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                }
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(fromMe ? Color.white.opacity(0.25) : Theme.blue.opacity(0.15)))
+            }
+            .buttonStyle(.plain)
+            WaveformView(seed: item.id, progress: isCurrent ? playback.progress : 0,
+                         played: fromMe ? .white : Theme.blue, unplayed: fromMe ? Color.white.opacity(0.45) : Color.secondary.opacity(0.5))
+                .frame(width: 130, height: 22)
+            Text(isCurrent && playback.duration > 0 ? playback.duration.clockString : "Audio")
+                .font(.system(size: 11)).monospacedDigit()
+                .opacity(0.85)
+        }
+        .foregroundStyle(fromMe ? Color.white : Color.primary)
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(fromMe ? AnyShapeStyle(Theme.blueGradient) : AnyShapeStyle(scheme == .dark ? Theme.receivedDark : Theme.receivedLight))
+        )
+        .help(item.name.isEmpty ? "Audio message" : item.name)
+    }
+}
+
+/// Decorative waveform: bar heights derived from the attachment id, so each message keeps the same shape.
+struct WaveformView: View {
+    let seed: String
+    let progress: Double
+    let played: Color
+    let unplayed: Color
+    private let bars = 26
+
+    var body: some View {
+        let heights = Waveform.heights(for: seed, count: bars)
+        GeometryReader { geo in
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<bars, id: \.self) { i in
+                    Capsule()
+                        .fill(Double(i) / Double(bars) < progress ? played : unplayed)
+                        .frame(height: max(3, geo.size.height * heights[i]))
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+}
+
+
+/// Bar heights (0.25…1) derived from the attachment id, so each audio message keeps the same shape.
+enum Waveform {
+    static func heights(for seed: String, count: Int) -> [CGFloat] {
+        var h: UInt64 = 14_695_981_039_346_656_037            // FNV-1a
+        for b in seed.utf8 { h = (h ^ UInt64(b)) &* 1_099_511_628_211 }
+        var out: [CGFloat] = []
+        for _ in 0..<count {
+            h ^= h << 13; h ^= h >> 7; h ^= h << 17           // xorshift
+            out.append(0.25 + CGFloat(h % 1000) / 1000 * 0.75)
+        }
+        return out
+    }
+}
+
+enum SharePresenter {
+    /// Shows the macOS share menu for a file, at the mouse position in the key window.
+    @MainActor static func share(_ url: URL) {
+        guard let window = NSApp.keyWindow, let view = window.contentView else { return }
+        let p = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        let picker = NSSharingServicePicker(items: [url])
+        picker.show(relativeTo: NSRect(x: p.x, y: p.y, width: 1, height: 1), of: view, preferredEdge: .minY)
     }
 }
 
@@ -261,23 +497,16 @@ struct ComposerView: View {
     @EnvironmentObject var model: AppModel
     let conversation: ConversationVM
     @State private var text = ""
-    @State private var attachments: [Attachment] = []
+    @State private var attachments: [OutgoingAttachment] = []
     @State private var textHeight: CGFloat = GrowingTextView.singleLineHeight
-
-    struct Attachment: Identifiable {
-        let id = UUID()
-        let data: Data
-        let name: String
-        let mime: String
-        let image: NSImage?
-    }
+    @StateObject private var recorder = VoiceRecorder()
 
     var body: some View {
         VStack(spacing: 0) {
             if let r = model.replyingTo {
                 HStack {
                     Image(systemName: "arrowshape.turn.up.left").foregroundStyle(.secondary)
-                    Text(r.text.isEmpty ? "Attachment" : r.text).lineLimit(1).foregroundStyle(.secondary)
+                    Text(r.summaryText).lineLimit(1).foregroundStyle(.secondary)
                     Spacer()
                     Button { model.replyingTo = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
                 }.font(.caption).padding(.horizontal, 16).padding(.top, 6)
@@ -290,31 +519,11 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Button { pickFile() } label: {
                     Image(systemName: "plus.circle.fill").font(.system(size: 24)).foregroundStyle(.secondary)
-                }.buttonStyle(.plain).padding(.bottom, 2).help("Attach files")
-
-                HStack(alignment: .bottom, spacing: 8) {
-                    ZStack(alignment: .leading) {
-                        if text.isEmpty {
-                            Text(conversation.raw.sendMode.rawValue == 0 ? "Text Message" : "Text Message · SMS")
-                                .font(.system(size: 14)).foregroundStyle(.tertiary).padding(.vertical, 2).allowsHitTesting(false)
-                        }
-                        GrowingTextView(text: $text, height: $textHeight, onSubmit: sendNow,
-                                        onChange: { t in if !t.isEmpty { model.typingChanged(in: conversation) } },
-                                        onPaste: { d, n, m in addAttachment(d, n, m) })
-                            .frame(height: textHeight)
-                            .transaction { $0.animation = nil }
-                    }
-                    Button { NSApp.orderFrontCharacterPalette(nil) } label: {
-                        Image(systemName: "face.smiling").font(.system(size: 16)).foregroundStyle(.secondary)
-                    }.buttonStyle(.plain).padding(.bottom, 1).help("Emoji & Symbols")
-                    if canSend {
-                        Button(action: sendNow) {
-                            Image(systemName: "arrow.up.circle.fill").font(.system(size: 24)).foregroundStyle(Theme.blue)
-                        }.buttonStyle(.plain).padding(.bottom, -2)
-                    }
                 }
-                .padding(.horizontal, 12).padding(.vertical, 5)
-                .background(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.secondary.opacity(0.4)))
+                .buttonStyle(.plain).padding(.bottom, 2).help("Attach files")
+                .disabled(recorder.isRecording)
+
+                if recorder.isRecording { recordingField } else { textField }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
         }
@@ -322,23 +531,81 @@ struct ComposerView: View {
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for p in providers {
                 p.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { item, _ in
-                    if let d = item as? Data, let url = URL(dataRepresentation: d, relativeTo: nil) { load(url) }
+                    guard let d = item as? Data, let url = URL(dataRepresentation: d, relativeTo: nil) else { return }
+                    let prepared = AttachmentPrep.prepare(fileURL: url)
+                    DispatchQueue.main.async { add(prepared, name: url.lastPathComponent) }
                 }
             }
             return true
         }
         .onAppear { text = model.drafts[conversation.id] ?? "" }
-        .onDisappear { model.drafts[conversation.id] = text }
+        .onDisappear {
+            model.drafts[conversation.id] = text
+            if recorder.isRecording { recorder.cancel() }
+        }
     }
 
-    @ViewBuilder private func chip(_ a: Attachment) -> some View {
+    private var textField: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text(conversation.raw.sendMode.rawValue == 0 ? "Text Message" : "Text Message · SMS")
+                        .font(.system(size: 14)).foregroundStyle(.tertiary).padding(.vertical, 2).allowsHitTesting(false)
+                }
+                GrowingTextView(text: $text, height: $textHeight, onSubmit: sendNow,
+                                onChange: { t in if !t.isEmpty { model.typingChanged(in: conversation) } },
+                                onPaste: { d, n, m in add(AttachmentPrep.prepare(data: d, name: n, mime: m), name: n) })
+                    .frame(height: textHeight)
+                    .transaction { $0.animation = nil }
+            }
+            Button { NSApp.orderFrontCharacterPalette(nil) } label: {
+                Image(systemName: "face.smiling").font(.system(size: 16)).foregroundStyle(.secondary)
+            }.buttonStyle(.plain).padding(.bottom, 1).help("Emoji & Symbols")
+            if canSend {
+                Button(action: sendNow) {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 24)).foregroundStyle(Theme.blue)
+                }.buttonStyle(.plain).padding(.bottom, -2).help("Send")
+            } else if VoiceRecorder.isAvailable {
+                Button { startRecording() } label: {
+                    Image(systemName: "mic.fill").font(.system(size: 15)).foregroundStyle(.secondary)
+                }.buttonStyle(.plain).padding(.bottom, 1).help("Record a voice message")
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.secondary.opacity(0.4)))
+    }
+
+    private var recordingField: some View {
+        HStack(spacing: 10) {
+            Button { recorder.cancel() } label: {
+                Image(systemName: "xmark.circle.fill").font(.system(size: 18)).foregroundStyle(.secondary)
+            }.buttonStyle(.plain).help("Discard recording")
+            Circle().fill(Color.red).frame(width: 8, height: 8)
+            Text(recorder.elapsed.clockString).font(.system(size: 13)).monospacedDigit()
+            GeometryReader { geo in
+                Capsule().fill(Color.secondary.opacity(0.2))
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(Color.red.opacity(0.7)).frame(width: max(4, geo.size.width * recorder.level))
+                    }
+            }
+            .frame(height: 6)
+            Button { finishRecording() } label: {
+                Image(systemName: "arrow.up.circle.fill").font(.system(size: 24)).foregroundStyle(Theme.blue)
+            }.buttonStyle(.plain).help("Send voice message")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.red.opacity(0.5)))
+        .onExitCommand { recorder.cancel() }
+    }
+
+    @ViewBuilder private func chip(_ a: OutgoingAttachment) -> some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if let img = a.image {
+                if let img = a.preview {
                     Image(nsImage: img).resizable().scaledToFill()
                 } else {
                     VStack(spacing: 2) {
-                        Image(systemName: "doc.fill").font(.title3)
+                        Image(systemName: a.mime.hasPrefix("audio/") ? "waveform" : "doc.fill").font(.title3)
                         Text(a.name).font(.system(size: 9)).lineLimit(1).padding(.horizontal, 3)
                     }.foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.secondary.opacity(0.18))
                 }
@@ -356,30 +623,34 @@ struct ComposerView: View {
 
     private func sendNow() {
         guard canSend else { return }
-        let t = text, a = attachments.map { ($0.data, $0.name, $0.mime) }
+        let t = text, a = attachments
         text = ""; attachments = []
         model.drafts[conversation.id] = ""
-        Task { await model.send(text: t, media: a, to: conversation) }
+        Task { await model.send(text: t, attachments: a, to: conversation) }
+    }
+
+    private func startRecording() {
+        Task { if let err = await recorder.start() { model.errorMessage = err } }
+    }
+
+    private func finishRecording() {
+        guard let a = recorder.finish() else { return }
+        Task { await model.send(text: "", attachments: [a], to: conversation) }
     }
 
     private func pickFile() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        if panel.runModal() == .OK { panel.urls.forEach(load) }
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { add(AttachmentPrep.prepare(fileURL: url), name: url.lastPathComponent) }
     }
 
-    private static let maxAttachmentBytes = 100 * 1024 * 1024
-
-    private func load(_ url: URL) {
-        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > Self.maxAttachmentBytes { return }
-        guard let data = try? Data(contentsOf: url) else { return }
-        let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-        DispatchQueue.main.async { addAttachment(data, url.lastPathComponent, mime) }
-    }
-
-    private func addAttachment(_ data: Data, _ name: String, _ mime: String) {
-        guard data.count <= Self.maxAttachmentBytes else { return }
-        attachments.append(Attachment(data: data, name: name, mime: mime, image: mime.hasPrefix("image/") ? NSImage(data: data) : nil))
+    private func add(_ a: OutgoingAttachment?, name: String) {
+        guard let a else {
+            model.errorMessage = "\(name) couldn't be attached. Files must be under 100 MB."
+            return
+        }
+        attachments.append(a)
     }
 }
 

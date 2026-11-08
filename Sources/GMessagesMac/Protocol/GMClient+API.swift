@@ -269,22 +269,30 @@ extension GMClient {
         return m
     }
 
+    /// MIME type -> conversations.MediaFormats, mirroring libgm's `MimeToMediaType` table.
+    static let mediaFormats: [String: Int] = [
+        "image/jpeg": 1, "image/jpg": 2, "image/png": 3, "image/gif": 4, "image/wbmp": 5, "image/bmp": 6, "image/x-ms-bmp": 6,
+        "video/mp4": 8, "video/3gpp2": 9, "video/3gpp": 10, "video/webm": 11, "video/x-matroska": 12,
+        "audio/aac": 14, "audio/amr": 15, "audio/mp3": 16, "audio/mpeg": 17, "audio/mpg": 18, "audio/mp4": 19,
+        "audio/mp4-latm": 20, "audio/3gpp": 21, "audio/ogg": 22,
+        "text/vcard": 24, "application/pdf": 25, "text/plain": 26, "text/html": 27,
+        "application/msword": 28,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": 29,
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation": 30,
+        "application/vnd.ms-powerpoint": 31,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": 32,
+        "application/vnd.ms-excel": 33, "application/vnd.android.package-archive": 34,
+        "application/zip": 35, "application/java-archive": 36,
+        "text/x-calendar": 38, "text/calendar": 40,
+    ]
+
     static func mediaFormat(_ mime: String) -> Int {
-        switch mime {
-        case "image/jpeg": return 1
-        case "image/jpg": return 2
-        case "image/png": return 3
-        case "image/gif": return 4
-        case "video/mp4": return 8
-        case "audio/mpeg", "audio/mp3": return 16
-        case "audio/aac": return 14
-        case "application/pdf": return 25
-        case "text/vcard": return 24
-        default:
-            if mime.hasPrefix("image/") { return 7 }
-            if mime.hasPrefix("video/") { return 13 }
-            if mime.hasPrefix("audio/") { return 23 }
-            return 37
-        }
+        let m = mime.lowercased()
+        if let f = mediaFormats[m] { return f }
+        if m.hasPrefix("image/") { return 7 }
+        if m.hasPrefix("video/") { return 13 }
+        if m.hasPrefix("audio/") { return 23 }
+        if m.hasPrefix("text/") { return 26 }
+        return 37
     }
 }

@@ -49,9 +49,8 @@ struct MediaViewer: View {
     }
 
     private func load() async {
-        guard let c = model.client else { failed = true; return }
         do {
-            let data = try await c.downloadMedia(id: item.id, key: item.key)
+            guard let data = await model.mediaData(for: item) else { throw GMError.protocolError("download failed") }
             if item.isImage, let img = NSImage(data: data) {
                 image = img
             } else if item.isVideo || item.isAudio {
@@ -66,39 +65,6 @@ struct MediaViewer: View {
             loading = false
         } catch {
             failed = true; loading = false
-        }
-    }
-}
-
-struct SettingsView: View {
-    @EnvironmentObject var model: AppModel
-    @State private var confirm = false
-    @AppStorage("linkPreviews") private var linkPreviews = true
-
-    var body: some View {
-        Form {
-            Section("Account") {
-                Text("Signed in via your Google account and paired with your Android phone.")
-                    .foregroundStyle(.secondary)
-                Button("Sign Out and Unpair…", role: .destructive) { confirm = true }
-            }
-            Section("Chat") {
-                Toggle("Show link previews", isOn: $linkPreviews)
-                Text("Previews load the linked page from your Mac, like iMessage does.").font(.caption).foregroundStyle(.secondary)
-            }
-            Section("About") {
-                Text("Unofficial client. Uses an undocumented Google API, so it may break when Google changes it.")
-                    .font(.caption).foregroundStyle(.secondary)
-                if !AppEnv.canNotify {
-                    Text("Notifications are available when run as GMessagesMac.app (see make_app.sh).")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 440, height: 380)
-        .confirmationDialog("Sign out and unpair this Mac from your phone?", isPresented: $confirm) {
-            Button("Sign Out", role: .destructive) { model.signOut() }
         }
     }
 }

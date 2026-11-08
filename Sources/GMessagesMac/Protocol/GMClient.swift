@@ -100,6 +100,7 @@ actor GMClient {
     private(set) var conversationsFetchedOnce = false
     var onFirstConnectDone = false
     private(set) var isConnected = false
+    private var reconnecting = false
 
     init(auth: AuthData) {
         self.auth = auth
@@ -275,8 +276,10 @@ actor GMClient {
 
     func connect() async throws {
         guard auth.hasCookies, auth.isPaired else { throw GMError.notLoggedIn }
-        do { try await refreshAuthToken() } catch let e as GMError {
-            if case .http(let c, _) = e, [401, 403, 404].contains(c) { throw e }
+        do { try await refreshAuthToken() } catch {
+            // Only a rejected session is fatal. Anything else (offline right after wake, timeouts) is retried by the
+            // long-poll loop, which refreshes the token itself; previously a URLError here left us disconnected.
+            if case GMError.http(let c, _) = error, [401, 403, 404].contains(c) { throw error }
         }
         startLongPolling(loggedIn: true) { [weak self] in
             Task { await self?.postConnect() }
@@ -294,10 +297,14 @@ actor GMClient {
         waiters.removeAll()
     }
 
+    /// Single-flight: overlapping calls (wake + network change, say) collapse into one reconnect.
     func reconnect() async {
+        guard !reconnecting else { return }
+        reconnecting = true
+        defer { reconnecting = false }
         disconnect()
         try? await Task.sleep(nanoseconds: 500_000_000)
-        try? await connect()
+        do { try await connect() } catch { emit(.listenError(error.localizedDescription)) }
     }
 
     private func postConnect() async {
@@ -442,7 +449,7 @@ actor GMClient {
                 }
                 if loggedIn { emit(.listenError(error.localizedDescription)) }
                 errorCount += 1
-                try? await Task.sleep(nanoseconds: UInt64((errorCount + 1) * 5) * 1_000_000_000)
+                await Self.backoff(errorCount)
                 continue
             }
             var payload = Client_ReceiveMessagesRequest()
@@ -475,9 +482,16 @@ actor GMClient {
                 if id != listenID { return }
                 if loggedIn { emit(.listenError(error.localizedDescription)) }
                 errorCount += 1
-                try? await Task.sleep(nanoseconds: UInt64(min((errorCount + 1) * 5, 60)) * 1_000_000_000)
+                await Self.backoff(errorCount)
             }
         }
+    }
+
+    /// Exponential backoff with jitter (5 s, 10 s, 20 s … capped at 2 min) so retries never hammer Google.
+    private static func backoff(_ attempt: Int) async {
+        let base = min(5.0 * pow(2.0, Double(max(attempt - 1, 0))), 120)
+        let delay = base + Double.random(in: 0...(base / 4))
+        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
     }
 
     /// Body is `[[` element (`,` element)* `]]`; each element is a complete pblite LongPollingPayload.
@@ -648,7 +662,7 @@ actor GMClient {
         } catch {
             pingTimeouts += 1
             if pingTimeouts >= 4, !notRespondingSent { notRespondingSent = true; emit(.phoneNotResponding) }
-            if pingTimeouts >= 3 { startLongPolling(loggedIn: true) }
+            if pingTimeouts == 3 { startLongPolling(loggedIn: true) }   // once; don't restart every minute
         }
     }
 }
