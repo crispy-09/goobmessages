@@ -694,7 +694,7 @@ final class AppModel: ObservableObject {
             guard requestedAvatars.insert(key).inserted else { return }
             let url = c.groupAvatarURL
             Task {
-                if let d = try? await client.downloadAvatar(url), let img = NSImage(data: d) {
+                if let d = try? await client.downloadAvatar(url), let img = LinkPreviewFetcher.decodeImage(d, maxPixel: 256) {
                     groupAvatars[c.id] = img
                 } else {
                     avatarFailures[key, default: 0] += 1

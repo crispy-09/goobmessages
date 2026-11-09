@@ -78,7 +78,14 @@ struct GrowingTextView: NSViewRepresentable {
             let content = max(ceil(lm.usedRect(for: tc).height), line)
             let total = content + tv.textContainerInset.height * 2
             let h = min(total, parent.maxHeight)
-            tv.enclosingScrollView?.hasVerticalScroller = total > parent.maxHeight
+            let overflowing = total > parent.maxHeight
+            tv.enclosingScrollView?.hasVerticalScroller = overflowing
+            // While everything fits, the text view grows a line before SwiftUI grows the frame, and NSTextView scrolls
+            // the clip view to keep the caret visible: the text jumps up then back. Keep it pinned to the top instead.
+            if !overflowing, let clip = tv.enclosingScrollView?.contentView, clip.bounds.origin != .zero {
+                clip.scroll(to: .zero)
+                tv.enclosingScrollView?.reflectScrolledClipView(clip)
+            }
             guard abs(parent.height - h) > 0.5 else { return }
             if immediate { parent.height = h } else { DispatchQueue.main.async { self.parent.height = h } }
         }

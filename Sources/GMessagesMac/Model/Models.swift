@@ -37,6 +37,7 @@ struct MessageVM: Identifiable, Hashable {
     var isFromMe: Bool
     var senderName: String
     var participantID: String
+    var senderContactID = ""  // non-empty when the sender is a saved contact on the phone
     var timestamp: Date
     var state: DeliveryState
     var media: [MediaItem]
@@ -51,6 +52,7 @@ struct MessageVM: Identifiable, Hashable {
         tmpID = m.tmpID
         conversationID = m.conversationID
         participantID = m.participantID
+        senderContactID = m.senderParticipant.contactID
         let status = m.messageStatus.status.rawValue
         isFromMe = (status >= 1 && status < 100) || m.senderParticipant.isMe || (!myParticipantID.isEmpty && m.participantID == myParticipantID)
         isTombstone = StatusCode.isTombstone(status)

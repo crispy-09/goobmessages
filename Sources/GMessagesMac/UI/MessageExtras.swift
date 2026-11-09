@@ -1,5 +1,4 @@
 import SwiftUI
-import LinkPresentation
 
 // MARK: - Link previews
 
@@ -8,68 +7,132 @@ final class LinkPreviewStore: ObservableObject {
     static let shared = LinkPreviewStore()
 
     struct Preview { var title: String; var host: String; var image: NSImage?; var icon: NSImage? }
+    private enum Pending { case loading, failed(Date) }
 
     @Published private(set) var previews: [URL: Preview] = [:]
-    private var attempted = Set<URL>()
+    private var pending: [URL: Pending] = [:]
+    private var order: [URL] = []
+
+    static let maxEntries = 200
+    static let retryAfter: TimeInterval = 300
 
     /// Previews fetch a URL chosen by the message sender, so only public https hosts are allowed.
     static func isSafe(_ url: URL) -> Bool { URLSafety.isPublicHTTPS(url) }
 
+    /// The URL actually fetched. Links typed without a scheme ("example.com") are detected as http, so they are
+    /// upgraded to https; cleartext is never fetched.
+    static func fetchURL(for url: URL) -> URL? {
+        guard var c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        if c.scheme?.lowercased() == "http" { c.scheme = "https"; if c.port == 80 { c.port = nil } }
+        c.fragment = nil
+        guard let u = c.url, isSafe(u) else { return nil }
+        return u
+    }
+
     func load(_ url: URL) {
-        guard Self.isSafe(url), !attempted.contains(url) else { return }
-        attempted.insert(url)
+        guard previews[url] == nil, let target = Self.fetchURL(for: url) else { return }
+        switch pending[url] {
+        case .loading?: return
+        case .failed(let at)? where Date().timeIntervalSince(at) < Self.retryAfter: return
+        default: break
+        }
+        pending[url] = .loading
         Task {
-            let provider = LPMetadataProvider()
-            provider.timeout = 8
-            guard let md = try? await provider.startFetchingMetadata(for: url) else { return }
-            let image = await Self.image(from: md.imageProvider)
-            let icon = await Self.image(from: md.iconProvider)
-            previews[url] = Preview(title: md.title ?? "", host: url.host ?? url.absoluteString, image: image, icon: icon)
+            guard let r = await LinkPreviewFetcher.shared.preview(for: target) else {
+                pending[url] = .failed(Date())
+                return
+            }
+            pending[url] = nil
+            var host = r.finalURL.host ?? target.host ?? ""
+            if host.hasPrefix("www.") { host.removeFirst(4) }
+            insert(Preview(title: r.title, host: host, image: r.image, icon: r.icon), for: url)
         }
     }
 
-    private static func image(from provider: NSItemProvider?) async -> NSImage? {
-        guard let provider, provider.canLoadObject(ofClass: NSImage.self) else { return nil }
-        return await withCheckedContinuation { cont in
-            provider.loadObject(ofClass: NSImage.self) { obj, _ in cont.resume(returning: obj as? NSImage) }
+    /// A loaded preview with something worth showing.
+    func displayable(_ url: URL) -> Preview? {
+        guard let p = previews[url], !(p.title.isEmpty && p.image == nil) else { return nil }
+        return p
+    }
+
+    private func insert(_ p: Preview, for url: URL) {
+        previews[url] = p
+        order.append(url)
+        while order.count > Self.maxEntries { previews[order.removeFirst()] = nil }
+        if pending.count > 500 { pending = pending.filter { if case .loading = $0.value { return true } else { return false } } }
+    }
+}
+
+/// The message's text bubble plus its link card. When the message is nothing but the link and the preview has loaded,
+/// the card stands in for the bubble (and takes over the `.bubbleCenter` alignment the row's buttons line up with).
+struct LinkPreviewSlot<Bubble: View>: View {
+    @ObservedObject private var store = LinkPreviewStore.shared
+    let url: URL?
+    let linkOnly: Bool
+    let hasText: Bool
+    @ViewBuilder let bubble: () -> Bubble
+
+    var body: some View {
+        let card = url.flatMap { store.displayable($0) == nil ? nil : $0 }
+        if let card, linkOnly {
+            LinkCard(url: card).alignmentGuide(.bubbleCenter) { $0[VerticalAlignment.center] }
+        } else {
+            if hasText { bubble().alignmentGuide(.bubbleCenter) { $0[VerticalAlignment.center] } }
+            if let card { LinkCard(url: card) }
         }
     }
 }
 
+/// Renders nothing until the preview has loaded; loading is triggered by the message row (`MessageRow.previewURL`).
+/// Compact layout: small thumbnail beside title + site. A direct image link shows just the image.
 struct LinkCard: View {
     @ObservedObject private var store = LinkPreviewStore.shared
     let url: URL
 
+    static let width: CGFloat = 250
+    static let thumb: CGFloat = 52
+
     var body: some View {
-        Group {
-            if let p = store.previews[url], !(p.title.isEmpty && p.image == nil) {
-                Button { NSWorkspace.shared.open(url) } label: {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if let img = p.image {
-                            Image(nsImage: img).resizable().scaledToFill().frame(width: 260, height: 140).clipped()
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            if !p.title.isEmpty {
-                                Text(p.title).font(.system(size: 13, weight: .semibold)).lineLimit(2)
-                                    .foregroundStyle(.primary).multilineTextAlignment(.leading)
-                            }
-                            HStack(spacing: 4) {
-                                if let ic = p.icon {
-                                    Image(nsImage: ic).resizable().frame(width: 12, height: 12)
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                }
-                                Text(p.host).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                        .padding(10).frame(width: 260, alignment: .leading)
+        if let p = store.displayable(url) {
+            Button { NSWorkspace.shared.open(url) } label: {
+                Group {
+                    if p.title.isEmpty, let img = p.image {
+                        Image(nsImage: img).resizable().scaledToFill().frame(width: Self.width, height: 130).clipped()
+                    } else {
+                        compact(p)
                     }
-                    .background(Color.secondary.opacity(0.15))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .buttonStyle(.plain)
+                .background(Color.secondary.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .buttonStyle(.plain)
+            .help(url.absoluteString)
         }
-        .onAppear { store.load(url) }
+    }
+
+    private func compact(_ p: LinkPreviewStore.Preview) -> some View {
+        HStack(spacing: 9) {
+            if let img = p.image ?? p.icon {
+                Image(nsImage: img).resizable().scaledToFill()
+                    .frame(width: Self.thumb, height: Self.thumb).clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(p.title).font(.system(size: 12, weight: .semibold)).lineLimit(2)
+                    .foregroundStyle(.primary).multilineTextAlignment(.leading)
+                HStack(spacing: 4) {
+                    if p.image != nil, let ic = p.icon {
+                        Image(nsImage: ic).resizable().frame(width: 11, height: 11)
+                            .clipShape(RoundedRectangle(cornerRadius: 2.5))
+                    }
+                    Text(p.host).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(7)
+        .frame(width: Self.width, alignment: .leading)
     }
 }
 

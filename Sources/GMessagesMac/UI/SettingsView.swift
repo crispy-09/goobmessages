@@ -14,7 +14,7 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.sendOnReturn) private var sendOnReturn = true
-    @AppStorage(Prefs.Key.linkPreviews) private var linkPreviews = true
+    @AppStorage(Prefs.Key.linkPreviewMode) private var previewMode: LinkPreviewMode = Prefs.linkPreviewMode
     @AppStorage(Prefs.Key.showMenuBarIcon) private var showMenuBarIcon = false
     @State private var openAtLogin = LoginItem.isEnabled
     @State private var loginError: String?
@@ -38,8 +38,10 @@ private struct GeneralSettings: View {
                 Toggle("Send with Return", isOn: $sendOnReturn)
                 Text(sendOnReturn ? "Shift-Return or Option-Return starts a new line." : "Return starts a new line. ⌘-Return sends.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("Show link previews", isOn: $linkPreviews)
-                Text("Previews load the linked page from your Mac, like iMessage does. Only public https links are fetched.")
+                Picker("Link previews", selection: $previewMode) {
+                    ForEach(LinkPreviewMode.allCases) { Text($0.label).tag($0) }
+                }
+                Text("Previews load the linked page from your Mac, which lets the site (and whoever sent the link) see your IP address and that you opened the chat. Links you send always preview. Only public https links are fetched.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

@@ -181,8 +181,11 @@ actor GMClient {
         fatalError("unreachable")
     }
 
-    /// Group icons are plain image URLs taken from conversation metadata (untrusted): public https only, no cookies,
-    /// and the web-client headers are only sent to Google-owned hosts.
+    static let maxAvatarBytes = 5 * 1024 * 1024
+
+    /// Group icons are plain image URLs taken from conversation metadata (untrusted): fetched via `SafeFetch` (public
+    /// https on every hop, size-capped, no cookies), and the web-client headers are only sent to Google-owned hosts
+    /// (and are dropped if a redirect leaves that host).
     func downloadAvatar(_ url: String) async throws -> Data {
         guard let u = URL(string: url), URLSafety.isPublicHTTPS(u) else { throw GMError.protocolError("avatar url rejected") }
         var req = URLRequest(url: u)
@@ -193,11 +196,10 @@ actor GMClient {
         } else {
             req.setValue(GMConstants.userAgent, forHTTPHeaderField: "user-agent")
         }
-        let (data, resp) = try await api.data(for: req)
-        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode), data.count < 20_000_000 else {
-            throw GMError.http((resp as? HTTPURLResponse)?.statusCode ?? 0, "downloading avatar")
+        guard let resp = await SafeFetch.get(req, session: api, limit: Self.maxAvatarBytes) else {
+            throw GMError.protocolError("avatar download refused or failed")
         }
-        return data
+        return resp.data
     }
 
     private func decodeResponse<M: SwiftProtobuf.Message>(_ data: Data, _ http: HTTPURLResponse) throws -> M {

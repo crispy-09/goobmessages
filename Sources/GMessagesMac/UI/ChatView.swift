@@ -26,6 +26,19 @@ struct ChatView: View {
         return m[min(max(findIndex, 0), m.count - 1)]
     }
 
+    @State private var atBottom = true
+
+    /// Changes whenever the last row's height can change without its id changing.
+    private var lastRowKey: String {
+        guard let m = list.last else { return "" }
+        return "\(m.id)|\(m.state)|\(m.reactions.count)|\(m.media.count)"
+    }
+
+    /// Deferred one runloop so the row's new height is laid out before scrolling.
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) } }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -59,13 +72,18 @@ struct ChatView: View {
                         }
                         if isTyping { TypingBubble().padding(.top, 6).id("typing") }
                         Color.clear.frame(height: 6).id("bottom")
+                            .onAppear { atBottom = true }
+                            .onDisappear { atBottom = false }
                     }
                     .padding(.horizontal, 16)
                 }
                 .onChange(of: list.last?.id) { _ in
                     guard !findVisible else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") }
+                    scrollToBottom(proxy)
                 }
+                // Rows grow after they're added ("Delivered"/"Read" line, link cards loading): keep following if pinned.
+                .onChange(of: lastRowKey) { _ in if atBottom && !findVisible { scrollToBottom(proxy) } }
+                .onReceive(LinkPreviewStore.shared.$previews) { _ in if atBottom && !findVisible { scrollToBottom(proxy) } }
                 .onChange(of: isTyping) { typing in if typing && !findVisible { proxy.scrollTo("bottom") } }
                 .onChange(of: currentMatch) { id in
                     guard let id else { return }
@@ -168,7 +186,7 @@ struct MessageRow: View {
     private let tapbacks = ["❤️", "👍", "👎", "😂", "😮", "😢"]
     @State private var showActions = false
     @State private var hovering = false
-    @AppStorage(Prefs.Key.linkPreviews) private var linkPreviews = true
+    @AppStorage(Prefs.Key.linkPreviewMode) private var previewMode: LinkPreviewMode = Prefs.linkPreviewMode
 
     var body: some View {
         if message.isTombstone {
@@ -179,7 +197,7 @@ struct MessageRow: View {
                 if showSender {
                     Text(message.senderName).font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 12)
                 }
-                HStack(spacing: 4) {
+                HStack(alignment: .bubbleCenter, spacing: 4) {
                     if message.isFromMe { Spacer(minLength: 60); hoverButton }
                     bubbleStack
                     if !message.isFromMe { hoverButton; Spacer(minLength: 60) }
@@ -213,20 +231,15 @@ struct MessageRow: View {
             ForEach(message.media) { item in MediaView(item: item, fromMe: message.isFromMe) }
             if emojiOnly {
                 Text(message.text.trimmingCharacters(in: .whitespacesAndNewlines)).font(.system(size: 52))
-            } else if !message.text.isEmpty || !message.subject.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    if !message.subject.isEmpty { Text(message.subject).fontWeight(.semibold) }
-                    if !message.text.isEmpty { Text(linkified(message.text)) }
-                }
-                .font(.system(size: 14))
-                .foregroundStyle(message.isFromMe ? Color.white : Color.primary)
-                .tint(message.isFromMe ? Color.white : Theme.blue)
-                .padding(.leading, message.isFromMe ? 12 : 17).padding(.trailing, message.isFromMe ? 17 : 12)
-                .padding(.vertical, 7)
-                .background(bubbleFill.clipShape(BubbleShape(fromMe: message.isFromMe, tail: showTail)))
+                    .alignmentGuide(.bubbleCenter) { $0[VerticalAlignment.center] }
+            } else {
+                let link = firstLink
+                LinkPreviewSlot(url: previewURL, linkOnly: link?.isWholeText ?? false,
+                                hasText: !message.text.isEmpty || !message.subject.isEmpty) { textBubble }
             }
-            if linkPreviews, !emojiOnly, let url = firstURL { LinkCard(url: url) }
         }
+        // Load from here, not from LinkCard: LinkCard renders nothing until loaded, so its own onAppear never fires.
+        .task(id: previewURL) { if let url = previewURL { LinkPreviewStore.shared.load(url) } }
         .background {
             if highlighted {
                 RoundedRectangle(cornerRadius: 20, style: .continuous).fill(Color.yellow.opacity(0.35)).padding(-5)
@@ -270,11 +283,38 @@ struct MessageRow: View {
         }
     }
 
-    private var firstURL: URL? {
-        guard !message.text.isEmpty, let det = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
-        let m = det.firstMatch(in: message.text, range: NSRange(message.text.startIndex..., in: message.text))
-        guard let url = m?.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
-        return url
+    private var textBubble: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if !message.subject.isEmpty { Text(message.subject).fontWeight(.semibold) }
+            if !message.text.isEmpty { Text(linkified(message.text)) }
+        }
+        .font(.system(size: 14))
+        .foregroundStyle(message.isFromMe ? Color.white : Color.primary)
+        .tint(message.isFromMe ? Color.white : Theme.blue)
+        .padding(.leading, message.isFromMe ? 12 : 17).padding(.trailing, message.isFromMe ? 17 : 12)
+        .padding(.vertical, 7)
+        .background(bubbleFill.clipShape(BubbleShape(fromMe: message.isFromMe, tail: showTail)))
+    }
+
+    private var senderIsContact: Bool {
+        if !message.senderContactID.isEmpty { return true }
+        return conversation.raw.participants.contains { $0.id.participantID == message.participantID && !$0.contactID.isEmpty }
+    }
+
+    private var previewURL: URL? {
+        guard !emojiOnly, previewMode.allows(fromMe: message.isFromMe, senderIsContact: senderIsContact) else { return nil }
+        return firstLink?.url
+    }
+
+    /// First http(s) link, and whether it is the entire message (then the card replaces the text, like iMessage).
+    private var firstLink: (url: URL, isWholeText: Bool)? {
+        let t = message.text
+        guard !t.isEmpty, let det = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue),
+              let m = det.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)), let url = m.url,
+              ["http", "https"].contains(url.scheme?.lowercased() ?? ""), let r = Range(m.range, in: t) else { return nil }
+        let whole = message.subject.isEmpty
+            && t[r].trimmingCharacters(in: .whitespacesAndNewlines) == t.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (url, whole)
     }
 
     private var emojiOnly: Bool {
@@ -547,29 +587,37 @@ struct ComposerView: View {
 
     private var textField: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            ZStack(alignment: .leading) {
+            ZStack(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(conversation.raw.sendMode.rawValue == 0 ? "Text Message" : "Text Message · SMS")
-                        .font(.system(size: 14)).foregroundStyle(.tertiary).padding(.vertical, 2).allowsHitTesting(false)
+                        .font(.system(size: 14)).foregroundStyle(.tertiary).lineLimit(1)
+                        .padding(.top, GrowingTextView.verticalInset).allowsHitTesting(false)
                 }
                 GrowingTextView(text: $text, height: $textHeight, onSubmit: sendNow,
                                 onChange: { t in if !t.isEmpty { model.typingChanged(in: conversation) } },
                                 onPaste: { d, n, m in add(AttachmentPrep.prepare(data: d, name: n, mime: m), name: n) })
-                    .frame(height: textHeight)
-                    .transaction { $0.animation = nil }
             }
+            // The field's height is driven only by the text view, never by the placeholder.
+            .frame(height: textHeight, alignment: .topLeading)
+            .transaction { $0.animation = nil }
             Button { NSApp.orderFrontCharacterPalette(nil) } label: {
                 Image(systemName: "face.smiling").font(.system(size: 16)).foregroundStyle(.secondary)
-            }.buttonStyle(.plain).padding(.bottom, 1).help("Emoji & Symbols")
-            if canSend {
-                Button(action: sendNow) {
-                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 24)).foregroundStyle(Theme.blue)
-                }.buttonStyle(.plain).padding(.bottom, -2).help("Send")
-            } else if VoiceRecorder.isAvailable {
-                Button { startRecording() } label: {
-                    Image(systemName: "mic.fill").font(.system(size: 15)).foregroundStyle(.secondary)
-                }.buttonStyle(.plain).padding(.bottom, 1).help("Record a voice message")
+                    .frame(width: 22, height: GrowingTextView.singleLineHeight)
+            }.buttonStyle(.plain).help("Emoji & Symbols")
+            // Send and mic share one fixed-size slot so swapping them (first keystroke) can't resize the bar.
+            ZStack {
+                if canSend {
+                    Button(action: sendNow) {
+                        Image(systemName: "arrow.up.circle.fill").font(.system(size: 22)).foregroundStyle(Theme.blue)
+                    }.buttonStyle(.plain).help("Send")
+                } else if VoiceRecorder.isAvailable {
+                    Button { startRecording() } label: {
+                        Image(systemName: "mic.fill").font(.system(size: 15)).foregroundStyle(.secondary)
+                    }.buttonStyle(.plain).help("Record a voice message")
+                }
             }
+            .frame(width: 24, height: GrowingTextView.singleLineHeight)
+            .transaction { $0.animation = nil }
         }
         .padding(.horizontal, 12).padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.secondary.opacity(0.4)))
@@ -711,4 +759,13 @@ struct NewChatView: View {
         let t = query.trimmingCharacters(in: .whitespaces)
         if !t.isEmpty { add(t) }
     }
+}
+
+extension VerticalAlignment {
+    /// Centre of a message's main text bubble, so row accessories (react/reply button) line up with it rather than
+    /// with the whole stack (reply quote + bubble + link card). Falls back to the stack's centre when there's no text.
+    private enum BubbleCenter: AlignmentID {
+        static func defaultValue(in d: ViewDimensions) -> CGFloat { d[VerticalAlignment.center] }
+    }
+    static let bubbleCenter = VerticalAlignment(BubbleCenter.self)
 }

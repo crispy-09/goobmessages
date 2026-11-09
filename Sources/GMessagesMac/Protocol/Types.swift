@@ -63,18 +63,62 @@ enum StatusCode {
 
 /// Guards fetches of URLs that originate from message/conversation data (i.e. untrusted).
 enum URLSafety {
-    /// https only, public host: refuses localhost, .local/.internal/.lan, single-label hosts, IP literals in private,
-    /// loopback, link-local or multicast ranges, and IPv6 literals.
+    static let blockedSuffixes = [".localhost", ".local", ".internal", ".lan", ".home.arpa", ".intranet", ".corp"]
+
+    /// https only, public host: refuses localhost/.local/.internal/…, single-label hosts, non-ASCII or odd characters,
+    /// IPv6 literals, and IPv4 literals unless canonical dotted-quad in a public range. Resolvers also accept forms
+    /// like `0x7f.0.0.1`, `127.1` or `017.0.0.1`, so any host whose last label is numeric/hex is treated as an IP.
+    /// This checks the name only; `LinkPreviewFetcher.resolvesToPublicAddresses` checks what it resolves to.
     static func isPublicHTTPS(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https", let host = url.host?.lowercased(), !host.isEmpty else { return false }
-        if host == "localhost" || host.hasSuffix(".local") || host.hasSuffix(".internal") || host.hasSuffix(".lan") { return false }
-        if host.contains(":") { return false }
-        if !host.contains(".") { return false }
-        let parts = host.split(separator: ".").compactMap { Int($0) }
-        if parts.count == 4 {
-            let (a, b) = (parts[0], parts[1])
-            if a == 10 || a == 127 || a == 0 || (a == 169 && b == 254) || (a == 172 && (16...31).contains(b)) || (a == 192 && b == 168) || a >= 224 { return false }
+        guard url.scheme?.lowercased() == "https", var host = url.host?.lowercased() else { return false }
+        if host.hasSuffix(".") { host.removeLast() }
+        guard !host.isEmpty,
+              host.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_") })
+        else { return false }   // also rejects IPv6 literals (':') and percent-encoding
+        if host == "localhost" || blockedSuffixes.contains(where: { host.hasSuffix($0) }) { return false }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, !labels.contains(where: \.isEmpty) else { return false }
+        let last = labels[labels.count - 1]
+        if last.allSatisfy(\.isNumber) || last.hasPrefix("0x") {
+            guard labels.count == 4 else { return false }
+            var bytes: [UInt8] = []
+            for l in labels {
+                guard l.allSatisfy(\.isNumber), l == "0" || !l.hasPrefix("0"), let v = UInt8(l) else { return false }
+                bytes.append(v)
+            }
+            return isPublicIPv4(bytes)
         }
+        return true
+    }
+
+    /// `bytes` in network order. Rejects this-network, private, CGNAT, loopback, link-local, IETF, benchmarking,
+    /// multicast and reserved ranges.
+    static func isPublicIPv4(_ b: [UInt8]) -> Bool {
+        guard b.count == 4 else { return false }
+        let (a, c) = (b[0], b[1])
+        switch a {
+        case 0, 10, 127: return false
+        case 100 where (64...127).contains(c): return false
+        case 169 where c == 254: return false
+        case 172 where (16...31).contains(c): return false
+        case 192 where c == 168: return false
+        case 192 where c == 0 && b[2] == 0: return false
+        case 198 where c == 18 || c == 19: return false
+        case 224...: return false
+        default: return true
+        }
+    }
+
+    /// `bytes` in network order. Embedded IPv4 (mapped, NAT64, 6to4) is checked as IPv4.
+    static func isPublicIPv6(_ b: [UInt8]) -> Bool {
+        guard b.count == 16 else { return false }
+        if b[0..<10].allSatisfy({ $0 == 0 }) && b[10] == 0xff && b[11] == 0xff { return isPublicIPv4(Array(b[12...])) }
+        if b[0..<12].allSatisfy({ $0 == 0 }) { return false }                     // ::, ::1, IPv4-compatible
+        if b[0] == 0x00 && b[1] == 0x64 && b[2] == 0xff && b[3] == 0x9b { return isPublicIPv4(Array(b[12...])) }
+        if b[0] == 0x20 && b[1] == 0x02 { return isPublicIPv4(Array(b[2..<6])) } // 6to4
+        if b[0] == 0xff { return false }                                          // multicast
+        if b[0] & 0xfe == 0xfc { return false }                                   // unique local
+        if b[0] == 0xfe && b[1] & 0x80 == 0x80 { return false }                   // link-local / site-local
         return true
     }
 
