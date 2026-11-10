@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Goob Messages
+GenericName=Messages
+Comment=Google Messages (SMS/RCS) for the desktop
+Exec=goobmessages
+Icon=goobmessages
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=sms;rcs;text;android;google;messages;
+StartupWMClass=goobmessages
+SingleMainWindow=true

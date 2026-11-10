@@ -94,6 +94,16 @@ Views never call `GMClient` directly; go through `AppModel`.
 * Keep UI iMessage-flavoured (blue `Theme.blue` sent bubbles, gray received, tails via `BubbleShape`).
 * Add a unit test for every bug found in codecs/crypto (see `Tests/`).
 
+## desktop/ (Linux & Windows client)
+Separate Go module (`desktop/go.mod`): Wails v2 app that **imports libgm directly** instead of porting it, so the
+protocol notes above (pblite, crypto, long-poll) are libgm's job there. Read `desktop/README.md` first.
+* `cd desktop && go test ./... && (cd frontend && npm test)` must pass. Linux builds need WebKitGTK 4.1
+  (`wails build -tags webkit2_41`); Windows builds are pure Go (cross-compile with `-platform windows/amd64`).
+* Same rules as the Mac app: notifications only via `Notifier.Enqueue` (planner in `internal/model/planner.go`),
+  reconnects only via `App.scheduleReconnect`, libgm's event handler must not block (spawn goroutines for RPCs),
+  untrusted URLs through `internal/urlsafe`, no message content on disk, never `{@html}` in Svelte.
+* Bump `go.mau.fi/mautrix-gmessages` to pick up protocol fixes; keep the CI Wails CLI version equal to `go.mod`'s.
+
 ## Ideas / known gaps
 Stickers/GIF picker, sending location, scheduled send, server-side full-text search (find only searches loaded
 messages), persistent offline cache (deliberately absent: nothing is cached to disk), mute state can't be read back
