@@ -118,6 +118,7 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.log = zerolog.New(zerolog.ConsoleWriter{Out: logOut, TimeFormat: time.Kitchen, NoColor: true}).Level(zerolog.InfoLevel).With().Timestamp().Logger()
+	a.log.Info().Str("version", appVersion).Msg("Starting Goob Messages")
 	a.notif.Start(ctx)
 	runtime.OnNotificationResponse(ctx, a.onNotificationResponse)
 	a.tray = startTray(a)

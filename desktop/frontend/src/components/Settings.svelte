@@ -4,6 +4,8 @@
 
   let { onclose } = $props()
   let confirmUnpair = $state(false)
+  let version = $state('')
+  api.version().then((v) => (version = v ?? '')).catch(() => {})
 
   function toggle(key) {
     savePrefs({ ...ui.prefs, [key]: !ui.prefs[key] })
@@ -54,7 +56,10 @@
       {/if}
     </section>
 
-    <div class="actions"><button class="primary" onclick={onclose}>Done</button></div>
+    <div class="actions">
+      {#if version}<span class="version">Goob Messages {version === 'dev' ? '(development build)' : version}</span>{/if}
+      <button class="primary" onclick={onclose}>Done</button>
+    </div>
   </div>
 </div>
 
@@ -68,5 +73,6 @@
   .hint { color: var(--text-3); font-size: 12px; margin: 4px 0 0 24px; }
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
   .danger { color: var(--danger); }
+  .version { margin-right: auto; align-self: center; font-size: 11.5px; color: var(--text-3); }
   .danger-fill { background: var(--danger); }
 </style>
