@@ -32,7 +32,19 @@ Windows). Protocol fixes come from upstream by bumping one dependency.
   light/dark mode, shortcuts: Ctrl+N new, Ctrl+F search, Ctrl+Shift+F find in chat, ↑/↓ in the chat list,
   Ctrl+, settings, Ctrl+Q quit.
 
-## Install / build
+## Download
+Prebuilt Linux (x86-64) and Windows (x64) builds are on the
+[releases page](https://github.com/crispy-09/goobmessages-mac/releases) (tags starting with `desktop-v`).
+- **Linux:** extract `goobmessages-<version>-linux-amd64.tar.gz` and run `./install.sh` (installs to `~/.local/bin`
+  plus an app-menu launcher; needs WebKitGTK 4.1).
+- **Windows:** run the `-setup.exe` installer, or the `-portable.exe`. Not code-signed, so SmartScreen may warn.
+
+### Making a release
+Push a tag like `desktop-v0.2.0` (or run the *Desktop release* workflow by hand with a version). GitHub Actions
+tests, builds both platforms with the version stamped in, and publishes a release with checksums. Versions with a
+suffix (`0.2.0-beta.1`) become pre-releases. Desktop releases are never marked "Latest", so the Mac release keeps it.
+
+## Build from source
 
 You need Go ≥ 1.26, Node ≥ 20 and the Wails CLI:
 ```bash

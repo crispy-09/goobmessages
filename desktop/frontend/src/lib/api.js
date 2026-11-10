@@ -40,6 +40,7 @@ export const api = {
   deleteConversation: (id) => call('DeleteConversation', id),
   contacts: () => call('Contacts'),
   getPrefs: () => call('GetPrefs'),
+  version: () => call('Version'),
   setPrefs: (p) => call('SetPrefs', p),
 }
 
