@@ -16,6 +16,8 @@ client for the chat UI. Your phone stays the source of truth; this is a paired "
 
 > Unofficial. Uses an undocumented API that Google can change at any time. Use with your own account. See `NOTICE.md`.
 
+> **Linux & Windows:** see [`desktop/`](desktop/README.md) for the cross-platform version (Go + libgm + Wails).
+
 ## Features
 - **Chats:** inbox / archive, unread dots, pinned chats, group chats with group icons (or a member-photo collage), new conversation from contacts, archive / delete, search, find in conversation (⌥⌘F).
 - **Messages:** send & receive SMS/RCS, replies, reactions (hover button, long-press or right-click), delete, copy, typing indicators, Delivered / Read, big-emoji messages, link previews, drafts per chat.

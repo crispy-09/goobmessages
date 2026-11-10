@@ -1,0 +1,8 @@
+# The repo root ignores build/; the desktop app keeps its Wails build resources (icon, Windows manifest) there.
+!build/
+build/bin/
+frontend/node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+frontend/src/lib/wailsjs/
+frontend/package.json.md5
