@@ -25,7 +25,10 @@ Windows). Protocol fixes come from upstream by bumping one dependency.
 - **Native notifications** (D-Bus on Linux, toasts on Windows): one per conversation instead of one per message, a
   single summary for the backlog after the computer wakes, reply / mark-as-read actions where the desktop supports
   them, per-chat **Hide Alerts** (right-click a chat), preview toggle.
-- Keeps running when the window is closed (optional), reconnects after sleep, unread count in the window title,
+- **System tray icon** (StatusNotifierItem on Linux, e.g. Caelestia/Waybar/KDE; notification area on Windows) with an
+  unread badge and Open / Quit; closing the window keeps the app running there. `goobmessages --hidden` starts it in
+  the tray (for login autostart).
+- Reconnects after sleep, unread count in the window title,
   light/dark mode, shortcuts: Ctrl+N new, Ctrl+F search, Ctrl+Shift+F find in chat, ↑/↓ in the chat list,
   Ctrl+, settings, Ctrl+Q quit.
 
@@ -49,6 +52,9 @@ cd desktop
 ./scripts/install-linux.sh
 ```
 Or only build: `wails build -tags webkit2_41` → `build/bin/goobmessages`.
+
+To start it in the tray when you log in, run `~/.local/bin/goobmessages --hidden` at startup, e.g. in Hyprland
+(`exec-once = ~/.local/bin/goobmessages --hidden`), or an XDG autostart entry on other desktops.
 
 ### Windows
 On Windows (WebView2 ships with Windows 10/11):
@@ -92,6 +98,6 @@ Data flow: libgm event → `App.handleEvent` → `model.Store` → Wails event (
 `avatar`, `typing`) → `ui` state → components. The UI calls Go methods through `frontend/src/lib/api.js`.
 
 ## Known gaps
-No voice recording, no system
-tray icon (Wails v2 has none: re-launch the app to show the window), no dual-SIM picker. On Windows a newer
+No voice recording, no dual-SIM
+picker. GNOME needs the AppIndicator extension to show tray icons. On Windows a newer
 notification for a chat may not replace the previous toast.

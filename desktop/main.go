@@ -35,6 +35,7 @@ func main() {
 		// Closing the window hides it (keeps notifications coming) when "keep running" is on. Quit (Ctrl+Q,
 		// SIGTERM, logout) always exits: an OnBeforeClose hook would also intercept those.
 		HideWindowOnClose: app.GetPrefs().KeepRunning,
+		StartHidden:       startHidden,
 		Bind:              []interface{}{app},
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId:               "io.github.goobmessages.desktop",
