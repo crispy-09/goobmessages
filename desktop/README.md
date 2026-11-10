@@ -34,7 +34,7 @@ Windows). Protocol fixes come from upstream by bumping one dependency.
 
 ## Download
 Prebuilt Linux (x86-64) and Windows (x64) builds are on the
-[releases page](https://github.com/crispy-09/goobmessages-mac/releases) (tags starting with `desktop-v`).
+[releases page](https://github.com/crispy-09/goobmessages/releases) (tags starting with `desktop-v`).
 - **Linux:** extract `goobmessages-<version>-linux-amd64.tar.gz` and run `./install.sh` (installs to `~/.local/bin`
   plus an app-menu launcher; needs WebKitGTK 4.1).
 - **Windows:** run the `-setup.exe` installer, or the `-portable.exe`. Not code-signed, so SmartScreen may warn.
