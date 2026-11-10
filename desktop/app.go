@@ -82,6 +82,7 @@ type App struct {
 
 	mediaCache *byteLRU
 	mediaSrv   *mediaServer
+	tray       trayHandle
 	previews   *previewStore
 	avatar     *avatarLoader
 	quit       atomic.Bool
@@ -119,6 +120,7 @@ func (a *App) startup(ctx context.Context) {
 	a.log = zerolog.New(zerolog.ConsoleWriter{Out: logOut, TimeFormat: time.Kitchen, NoColor: true}).Level(zerolog.InfoLevel).With().Timestamp().Logger()
 	a.notif.Start(ctx)
 	runtime.OnNotificationResponse(ctx, a.onNotificationResponse)
+	a.tray = startTray(a)
 	go a.watchSleep()
 
 	auth, err := storage.LoadSession()
@@ -142,6 +144,9 @@ func (a *App) shutdown(ctx context.Context) {
 		cli.Disconnect()
 	}
 	a.notif.Stop()
+	if a.tray != nil {
+		a.tray.Close()
+	}
 }
 
 // Quit really exits (from the app menu).
@@ -202,6 +207,9 @@ func (a *App) emitStatus() {
 		title = fmt.Sprintf("Messages (%d)", s.Unread)
 	}
 	runtime.WindowSetTitle(a.ctx, title)
+	if a.tray != nil {
+		a.tray.SetUnread(s.Unread)
+	}
 }
 
 func (a *App) GetStatus() Status {

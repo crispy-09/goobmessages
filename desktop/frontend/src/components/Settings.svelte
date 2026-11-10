@@ -30,7 +30,7 @@
       <h3>General</h3>
       <label><input type="checkbox" checked={ui.prefs.enterToSend} onchange={() => toggle('enterToSend')} /> Press Enter to send (Shift+Enter for a new line)</label>
       <label><input type="checkbox" checked={ui.prefs.keepRunning} onchange={() => toggle('keepRunning')} /> Keep running when the window is closed</label>
-      <p class="hint">When on, closing the window keeps you connected for notifications. Open the app again to show it. Quit with Ctrl+Q. Takes effect after restarting the app.</p>
+      <p class="hint">When on, closing the window keeps the app in the system tray, connected for notifications. Click the tray icon to show it again; quit from its menu or with Ctrl+Q. Takes effect after restarting the app.</p>
       <label class="select">Link previews
         <select value={ui.prefs.linkPreviews ?? 'contacts'} onchange={(e) => savePrefs({ ...ui.prefs, linkPreviews: e.currentTarget.value })}>
           <option value="everyone">From everyone</option>

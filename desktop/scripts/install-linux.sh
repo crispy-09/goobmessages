@@ -7,8 +7,14 @@ cd "$(dirname "$0")/.."
 WAILS="${WAILS:-$(command -v wails || echo "$HOME/go/bin/wails")}"
 "$WAILS" build -tags webkit2_41 -trimpath -clean
 install -Dm755 build/bin/goobmessages "$HOME/.local/bin/goobmessages"
-install -Dm644 build/linux/goobmessages.desktop "$HOME/.local/share/applications/goobmessages.desktop"
+# Absolute Exec path: launchers started by the compositor (Hyprland, Quickshell/Caelestia, …) often don't have
+# ~/.local/bin on their PATH.
+mkdir -p "$HOME/.local/share/applications"
+sed "s|^Exec=goobmessages|Exec=$HOME/.local/bin/goobmessages|" build/linux/goobmessages.desktop \
+  > "$HOME/.local/share/applications/goobmessages.desktop"
+chmod 644 "$HOME/.local/share/applications/goobmessages.desktop"
 install -Dm644 build/appicon.png "$HOME/.local/share/icons/hicolor/512x512/apps/goobmessages.png"
 update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
 gtk-update-icon-cache -q "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
 echo "Installed. Launch \"Goob Messages\" from your app menu, or run: goobmessages"
+echo "To start it in the tray at login, run on startup: $HOME/.local/bin/goobmessages --hidden"
