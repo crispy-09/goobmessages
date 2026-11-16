@@ -44,6 +44,8 @@
 
 <svelte:window onkeydown={onKey} />
 
+<!-- A rendering error would otherwise unmount everything and leave a blank window. -->
+<svelte:boundary onerror={(e) => console.error('UI error', e)}>
 {#if ui.status.phase === 'loading'}
   <div class="center"><div class="spinner"></div></div>
 {:else if ui.status.phase === 'login'}
@@ -68,6 +70,17 @@
   </div>
 {/if}
 
+{#snippet failed(error, reset)}
+  <div class="center">
+    <div class="crash">
+      <p>Something went wrong displaying Messages.</p>
+      <button onclick={reset}>Try again</button>
+      <button onclick={() => location.reload()}>Reload</button>
+    </div>
+  </div>
+{/snippet}
+</svelte:boundary>
+
 {#if showSettings}<Settings onclose={() => (showSettings = false)} />{/if}
 {#if showNew}<NewChat onclose={() => (showNew = false)} />{/if}
 
@@ -89,6 +102,8 @@
     background: var(--banner); color: var(--banner-text); padding: 7px 14px; font-size: 12.5px; text-align: center;
     border-bottom: 1px solid var(--sidebar-border);
   }
+  .crash { text-align: center; color: var(--text-2); }
+  .crash button { margin: 4px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--sidebar-border); background: var(--bg); color: var(--text); }
   .link { background: none; border: none; color: var(--blue); font-weight: 600; padding: 0 4px; }
   .toast {
     position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%); z-index: 60;
