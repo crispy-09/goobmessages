@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import { toast } from '../lib/state.svelte.js'
   import { fileSize } from '../lib/format.js'
 
   let { media, fromMe, local, onview } = $props()
@@ -10,18 +11,41 @@
   let failed = $state(false)
   let errorText = $state('')
   let loading = $state(false)
+  let unplayable = $state(false) // downloaded, but the webview can't play it: offer to save it instead
+  let saving = $state(false)
 
   const kind = $derived(
     media.mime?.startsWith('image/') ? 'image' : media.mime?.startsWith('video/') ? 'video' : media.mime?.startsWith('audio/') ? 'audio' : 'file'
   )
   const aspect = $derived(media.width > 0 && media.height > 0 ? `${media.width} / ${media.height}` : '4 / 3')
 
+  // WebKitGTK's media player (GStreamer) only plays http(s), blob: and a few other URL schemes, not the app's own
+  // wails:// scheme that serves attachments on Linux, so video/audio are handed to it as a blob: URL instead.
+  // Images (and Windows, where the app is served over http) use the media URL directly.
+  const needsBlob = !/^https?:$/.test(location.protocol)
+  let blobUrl = ''
+
+  async function playableUrl(src) {
+    if (!needsBlob || kind === 'image') return src
+    const res = await fetch(src)
+    if (!res.ok) throw new Error(`couldn't read the ${kind} (${res.status})`)
+    const blob = await res.blob()
+    revokeBlob()
+    blobUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: media.mime }))
+    return blobUrl
+  }
+
+  function revokeBlob() {
+    if (blobUrl) URL.revokeObjectURL(blobUrl)
+    blobUrl = ''
+  }
+
   async function load(full = true) {
     if (!media.id || loading || url) return
     loading = true
     try {
       if (!full && media.thumbId) thumb = await api.getMedia(media.thumbId, media.thumbKey, 'image/jpeg')
-      else url = await api.getMedia(media.id, media.key, media.mime)
+      else url = await playableUrl(await api.getMedia(media.id, media.key, media.mime))
     } catch (e) {
       failed = true
       errorText = String(e?.message ?? e ?? '')
@@ -32,7 +56,7 @@
 
   // Images load when scrolled into view; videos show their thumbnail until played; files load on demand.
   onMount(() => {
-    if (!media.id || (kind !== 'image' && kind !== 'video')) return
+    if (!media.id || (kind !== 'image' && kind !== 'video')) return revokeBlob
     const io = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) {
         io.disconnect()
@@ -40,7 +64,10 @@
       }
     }, { rootMargin: '400px' })
     io.observe(el)
-    return () => io.disconnect()
+    return () => {
+      io.disconnect()
+      revokeBlob()
+    }
   })
 
   function retry() {
@@ -48,13 +75,46 @@
     errorText = ''
     url = ''
     thumb = ''
+    revokeBlob()
     load(kind === 'image' || kind === 'audio' || !media.thumbId)
   }
 
   // The download worked but the webview couldn't show it (unsupported format, or the local media URL failed).
+  // Videos/audio the webview can't play (codec, or a file Google Messages itself won't preview) become a download
+  // card, like Messages for web does.
   function displayError() {
+    if (kind === 'video' || kind === 'audio') {
+      unplayable = true
+      url = ''
+      revokeBlob()
+      return
+    }
     failed = true
     errorText = `can't display this ${kind}`
+  }
+
+  // A broken file can also leave the player stuck on its first frame without an error event: if playback hasn't
+  // advanced 10 s after loading (and the user didn't pause it), treat it as unplayable.
+  let stallTimer
+  function watchStall() {
+    clearTimeout(stallTimer)
+    stallTimer = setTimeout(displayError, 10000)
+  }
+  function progressed(e) {
+    if (e.currentTarget.currentTime > 0.5) clearTimeout(stallTimer)
+  }
+  $effect(() => () => clearTimeout(stallTimer))
+
+  async function save() {
+    if (saving) return
+    saving = true
+    try {
+      await api.saveMedia(media.id, media.key, media.name || (kind === 'video' ? 'video.mp4' : 'audio'))
+    } catch (e) {
+      toast(e)
+    } finally {
+      saving = false
+    }
   }
 
   async function playVideo() {
@@ -65,9 +125,21 @@
   }
 </script>
 
+{#snippet saveBtn()}
+  <button class="dl" onclick={save} disabled={saving} title="Save video…" aria-label="Save video">
+    {#if saving}<span class="spinner"></span>{:else}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>{/if}
+  </button>
+{/snippet}
+
 <div bind:this={el} class="media {kind}" class:me={fromMe}>
   {#if local}
     <div class="file pending"><span class="spinner"></span> Sending {media.name || 'attachment'}…</div>
+  {:else if unplayable}
+    <div class="file err">
+      <span><span class="fname">{kind === 'video' ? '🎬' : '🎵'} {media.name || (kind === 'video' ? 'Video' : 'Audio message')}</span>
+        <small class="why">Can't play here{media.size ? ` · ${fileSize(media.size)}` : ''}</small></span>
+      <button class="retry" onclick={save} disabled={saving}>{saving ? 'Saving…' : 'Save…'}</button>
+    </div>
   {:else if failed}
     <div class="file err" title={errorText}>
       <span>⚠️ Couldn't load {kind === 'file' ? media.name || 'attachment' : kind}{#if errorText}<small class="why">{errorText}</small>{/if}</span>
@@ -83,12 +155,19 @@
     {/if}
   {:else if kind === 'video'}
     {#if url}
-      <!-- svelte-ignore a11y_media_has_caption -->
-      <video src={url} controls autoplay style="aspect-ratio:{aspect}" onerror={displayError}></video>
+      <div class="vwrap">
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video src={url} controls autoplay style="aspect-ratio:{aspect}" onerror={displayError} onloadstart={watchStall}
+          ontimeupdate={progressed} onpause={() => clearTimeout(stallTimer)}></video>
+        {@render saveBtn()}
+      </div>
     {:else}
-      <button class="ph video-ph" style="aspect-ratio:{aspect};{thumb ? `background-image:url(${thumb})` : ''}" onclick={playVideo} aria-label="Play video">
-        <span class="play">{loading ? '…' : '▶'}</span>
-      </button>
+      <div class="vwrap">
+        <button class="ph video-ph" style="aspect-ratio:{aspect};{thumb ? `background-image:url(${thumb})` : ''}" onclick={playVideo} aria-label="Play video">
+          <span class="play">{loading ? '…' : '▶'}</span>
+        </button>
+        {@render saveBtn()}
+      </div>
     {/if}
   {:else if kind === 'audio'}
     {#if url}
@@ -112,6 +191,13 @@
   .video-ph { background-size: cover; background-position: center; display: grid; place-items: center; }
   .play { width: 46px; height: 46px; border-radius: 50%; background: rgba(0, 0, 0, 0.5); color: white; display: grid; place-items: center; font-size: 18px; }
   audio { max-width: 280px; height: 40px; }
+  .vwrap { position: relative; }
+  .dl {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 32px; height: 32px; border-radius: 50%; border: none; padding: 0;
+    background: rgba(0, 0, 0, 0.55); color: white; display: grid; place-items: center; cursor: pointer;
+  }
+  .dl:hover { background: rgba(0, 0, 0, 0.75); }
+  .dl svg { width: 16px; height: 16px; }
   .file {
     display: flex; align-items: center; gap: 6px; border: none; background: var(--received); color: var(--received-text);
     padding: 9px 13px; border-radius: 16px; max-width: 300px; text-align: left;
