@@ -36,6 +36,7 @@ export const api = {
   setTyping: (id) => call('SetTyping', id),
   startConversation: (numbers) => call('StartConversation', numbers),
   hideAlerts: (id, hide) => call('HideAlerts', id, hide),
+  setPinned: (id, pinned) => call('SetPinned', id, !!pinned),
   setArchived: (id, archived) => call('SetArchived', id, !!archived),
   deleteConversation: (id) => call('DeleteConversation', id),
   contacts: () => call('Contacts'),

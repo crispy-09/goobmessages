@@ -16,6 +16,7 @@ type Store struct {
 	notifiedOrder []string
 	selectedID    string
 	focused       bool
+	pins          map[string]bool // local pin overrides, applied on top of the phone's pinned flag
 }
 
 // Cursor marks where to continue loading older messages.
@@ -31,7 +32,19 @@ func NewStore() *Store {
 		messages: map[string][]Message{},
 		cursors:  map[string]Cursor{},
 		notified: map[string]bool{},
+		pins:     map[string]bool{},
 	}
+}
+
+// SetPins replaces the local pin overrides (true = pinned, false = unpinned regardless of the phone).
+func (s *Store) SetPins(pins map[string]bool) {
+	cp := make(map[string]bool, len(pins))
+	for k, v := range pins {
+		cp[k] = v
+	}
+	s.mu.Lock()
+	s.pins = cp
+	s.mu.Unlock()
 }
 
 func (s *Store) Reset() {
@@ -124,6 +137,9 @@ func (s *Store) Conversations() []Conversation {
 	defer s.mu.Unlock()
 	out := make([]Conversation, 0, len(s.convs))
 	for _, c := range s.convs {
+		if p, ok := s.pins[c.ID]; ok {
+			c.Pinned = p
+		}
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool {

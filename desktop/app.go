@@ -109,6 +109,7 @@ func NewApp() *App {
 		}
 		return a.prefs.Notifications, a.prefs.Previews, h
 	})
+	a.store.SetPins(a.prefs.Pins)
 	a.avatar = newAvatarLoader(a)
 	return a
 }
@@ -122,6 +123,8 @@ func (a *App) startup(ctx context.Context) {
 	a.notif.Start(ctx)
 	runtime.OnNotificationResponse(ctx, a.onNotificationResponse)
 	a.tray = startTray(a)
+	startWebviewGuard()
+	startNotifClickWatcher()
 	go a.watchSleep()
 
 	auth, err := storage.LoadSession()
@@ -705,11 +708,17 @@ func (a *App) onNotificationResponse(res runtime.NotificationResult) {
 			go a.MarkRead(cid)
 		}
 	default:
-		runtime.WindowUnminimise(a.ctx)
-		runtime.WindowShow(a.ctx)
-		if cid != "" {
-			runtime.EventsEmit(a.ctx, "open-conversation", cid)
-		}
+		// Also sent when a banner is dismissed or expires; only a real click should raise the window.
+		go func() {
+			if !notificationWasClicked() {
+				return
+			}
+			runtime.WindowUnminimise(a.ctx)
+			runtime.WindowShow(a.ctx)
+			if cid != "" {
+				runtime.EventsEmit(a.ctx, "open-conversation", cid)
+			}
+		}()
 	}
 }
 
@@ -996,6 +1005,30 @@ func (a *App) HideAlerts(cid string, hide bool) {
 	_ = storage.SavePrefs(p)
 }
 
+// SetPinned pins or unpins a conversation on this computer (pinned chats are listed first).
+func (a *App) SetPinned(cid string, pinned bool) error {
+	conv, ok := a.store.Conversation(cid)
+	if !ok {
+		return errors.New("conversation not found")
+	}
+	a.mu.Lock()
+	pins := make(map[string]bool, len(a.prefs.Pins)+1)
+	for k, v := range a.prefs.Pins {
+		pins[k] = v
+	}
+	if pinned == conv.Pinned {
+		delete(pins, cid) // matches what the phone says: no override needed
+	} else {
+		pins[cid] = pinned
+	}
+	a.prefs.Pins = pins
+	p := a.prefs
+	a.mu.Unlock()
+	a.store.SetPins(pins)
+	a.emitConversations()
+	return storage.SavePrefs(p)
+}
+
 func (a *App) GetPrefs() storage.Prefs {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1007,6 +1040,7 @@ func (a *App) SetPrefs(p storage.Prefs) error {
 	if p.HiddenAlerts == nil {
 		p.HiddenAlerts = a.prefs.HiddenAlerts
 	}
+	p.Pins = a.prefs.Pins // only SetPinned changes pins; the Settings sheet may hold a stale copy
 	switch p.LinkPreviews {
 	case "everyone", "contacts", "off":
 	default:

@@ -117,13 +117,16 @@ type Prefs struct {
 	KeepRunning   bool            `json:"keepRunning"` // closing the window hides it
 	EnterToSend   bool            `json:"enterToSend"`
 	HiddenAlerts  map[string]bool `json:"hiddenAlerts"`
+	// Pins are local pin/unpin choices per conversation (true = pinned, false = unpinned even if the phone pins
+	// it). Google's pin RPC isn't known, so pins live on this computer only.
+	Pins map[string]bool `json:"pins"`
 	// LinkPreviews: "everyone", "contacts" (links from saved contacts and from you) or "off".
 	LinkPreviews string `json:"linkPreviews"`
 }
 
 func DefaultPrefs() Prefs {
 	return Prefs{Notifications: true, Previews: true, KeepRunning: true, EnterToSend: true,
-		HiddenAlerts: map[string]bool{}, LinkPreviews: "contacts"}
+		HiddenAlerts: map[string]bool{}, Pins: map[string]bool{}, LinkPreviews: "contacts"}
 }
 
 func LoadPrefs() Prefs {
@@ -133,6 +136,9 @@ func LoadPrefs() Prefs {
 	}
 	if p.HiddenAlerts == nil {
 		p.HiddenAlerts = map[string]bool{}
+	}
+	if p.Pins == nil {
+		p.Pins = map[string]bool{}
 	}
 	switch p.LinkPreviews {
 	case "everyone", "contacts", "off":

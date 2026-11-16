@@ -28,7 +28,7 @@
 
   function openMenu(e, conv) {
     e.preventDefault()
-    menu = { x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 200), conv, confirmDelete: false }
+    menu = { x: Math.min(e.clientX, window.innerWidth - 220), y: Math.min(e.clientY, window.innerHeight - 240), conv, confirmDelete: false }
   }
 
   async function archive(conv) {
@@ -36,6 +36,13 @@
     try {
       await api.setArchived(conv.id, !conv.archived)
       if (ui.selectedId === conv.id && !conv.archived) select('')
+    } catch (e) { toast(e) }
+  }
+
+  async function pin(conv) {
+    menu = null
+    try {
+      await api.setPinned(conv.id, !conv.pinned)
     } catch (e) { toast(e) }
   }
 
@@ -90,6 +97,7 @@
         <span class="text">
           <span class="top">
             <span class="name">{c.name || 'Unknown'}</span>
+            {#if c.pinned}<span class="pin" title="Pinned"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M10.6 1.4a1 1 0 0 0-1.5.1L6.8 4.6l-2.6.5a.8.8 0 0 0-.4 1.3l2.2 2.2-3.5 4.6.3.3 4.6-3.5 2.2 2.2a.8.8 0 0 0 1.3-.4l.5-2.6 3.1-2.3a1 1 0 0 0 .1-1.5z"/></svg></span>{/if}
             {#if ui.prefs.hiddenAlerts?.[c.id]}<span class="muted" title="Alerts hidden">🔕</span>{/if}
             <span class="time">{listTime(c.timestamp)}</span>
           </span>
@@ -116,6 +124,7 @@
 {#if menu}
   <div class="menu" style="left:{menu.x}px;top:{menu.y}px" role="menu">
     <button role="menuitem" onclick={() => { api.markRead(menu.conv.id); menu = null }}>Mark as Read</button>
+    <button role="menuitem" onclick={() => pin(menu.conv)}>{menu.conv.pinned ? 'Unpin' : 'Pin'}</button>
     <button role="menuitem" onclick={() => toggleAlerts(menu.conv)}>
       {ui.prefs.hiddenAlerts?.[menu.conv.id] ? 'Show Alerts' : 'Hide Alerts'}
     </button>
@@ -150,6 +159,9 @@
   .top { display: flex; align-items: baseline; gap: 6px; }
   .name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .muted { font-size: 11px; }
+  .pin { color: var(--text-3); flex: none; display: inline-flex; align-self: center; }
+  .pin svg { width: 11px; height: 11px; }
+  .row.selected .pin { color: rgba(255, 255, 255, 0.82); }
   .time { font-size: 12px; color: var(--text-2); flex: none; }
   .preview {
     color: var(--text-2); font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;

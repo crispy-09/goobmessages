@@ -21,3 +21,18 @@ func TestHiddenConversationsAreRemoved(t *testing.T) {
 		t.Fatal("archived a missing conversation")
 	}
 }
+
+func TestLocalPinsOverridePhone(t *testing.T) {
+	s := NewStore()
+	s.UpsertConversation(Conversation{ID: "old", Timestamp: 1})
+	s.UpsertConversation(Conversation{ID: "new", Timestamp: 9})
+	s.UpsertConversation(Conversation{ID: "phonepin", Timestamp: 5, Pinned: true})
+	s.SetPins(map[string]bool{"old": true, "phonepin": false})
+	got := s.Conversations()
+	if got[0].ID != "old" || !got[0].Pinned {
+		t.Fatalf("locally pinned chat not first: %+v", got)
+	}
+	if got[1].ID != "new" || got[2].ID != "phonepin" || got[2].Pinned {
+		t.Fatalf("unpin override not applied: %+v", got)
+	}
+}
