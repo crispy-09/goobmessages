@@ -136,7 +136,9 @@ jobs:
           Goob Messages for **Linux and Windows** $VERSION, a Google Messages (SMS/RCS) client for your Android phone.
 
           **Linux** (x86-64): download \`goobmessages-$VERSION-linux-amd64.tar.gz\`, extract it and run \`./install.sh\`.
-          Needs WebKitGTK 4.1 (Arch: \`webkit2gtk-4.1\`, Debian/Ubuntu: \`libwebkit2gtk-4.1-0\`, Fedora: \`webkit2gtk4.1\`).
+          Needs WebKitGTK 4.1 (Arch: \`webkit2gtk-4.1\`, Debian/Ubuntu: \`libwebkit2gtk-4.1-0\`, Fedora: \`webkit2gtk4.1\`)
+          and GStreamer's base, good and libav plugins for videos and voice messages (Arch: \`gst-plugins-base gst-plugins-good gst-libav\`,
+          Debian/Ubuntu: \`gstreamer1.0-plugins-good gstreamer1.0-libav\`, Fedora: \`gstreamer1-plugins-good gstreamer1-plugin-libav\`); \`install.sh\` checks for them.
 
           **Windows 10/11** (x64): run \`goobmessages-$VERSION-windows-amd64-setup.exe\`, or use the \`-portable.exe\`.
           The builds aren't code-signed, so SmartScreen may warn on first launch ("More info" → "Run anyway").

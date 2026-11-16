@@ -13,7 +13,7 @@ Windows). Protocol fixes come from upstream by bumping one dependency.
 - **Sign in with Google**: Google's own sign-in page opens in a separate native window (WebView2 / WebKitGTK, throwaway
   profile), then you confirm on your phone by tapping the emoji shown in the app. (Google no longer offers QR pairing.)
 - Inbox and archive, unread dots, pinned chats, group chats (group icon or member-photo collage), search,
-  archive / unarchive / delete a chat (right-click it), new conversation from your phone's contacts or by number(s).
+  pin / unpin (kept on this computer), archive / unarchive / delete a chat (right-click it), new conversation from your phone's contacts or by number(s).
 - **Find in conversation** (Ctrl+Shift+F) across the loaded messages, jumping to each match.
 - Send & receive text, replies (click a reply to jump to the original), reactions (right-click a message), delete,
   copy, typing indicators, Delivered / Read, big-emoji messages, safe clickable links (http(s)/mailto/tel, and bare
@@ -36,7 +36,8 @@ Windows). Protocol fixes come from upstream by bumping one dependency.
 Prebuilt Linux (x86-64) and Windows (x64) builds are on the
 [releases page](https://github.com/crispy-09/goobmessages/releases) (tags starting with `desktop-v`).
 - **Linux:** extract `goobmessages-<version>-linux-amd64.tar.gz` and run `./install.sh` (installs to `~/.local/bin`
-  plus an app-menu launcher; needs WebKitGTK 4.1).
+  plus an app-menu launcher; needs WebKitGTK 4.1 and the GStreamer plugins listed under *Build from source → Linux*: without them
+  opening a chat with a video or voice message crashes the window).
 - **Windows:** run the `-setup.exe` installer, or the `-portable.exe`. Not code-signed, so SmartScreen may warn.
 
 ### Making a release
@@ -52,11 +53,12 @@ go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 ```
 
 ### Linux
-Install WebKitGTK 4.1 first:
+Install WebKitGTK 4.1 and the GStreamer plugins it plays audio/video with (WebKit aborts the page when they're
+missing) first:
 ```bash
-sudo pacman -S --needed webkit2gtk-4.1 gtk3              # Arch
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev       # Debian / Ubuntu
-sudo dnf install webkit2gtk4.1-devel gtk3-devel           # Fedora
+sudo pacman -S --needed webkit2gtk-4.1 gtk3 gst-plugins-base gst-plugins-good gst-libav           # Arch
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev gstreamer1.0-plugins-good gstreamer1.0-libav  # Debian / Ubuntu
+sudo dnf install webkit2gtk4.1-devel gtk3-devel gstreamer1-plugins-good gstreamer1-plugin-libav    # Fedora
 ```
 Then build and install for your user (binary in `~/.local/bin`, plus an app-menu launcher and icon):
 ```bash
