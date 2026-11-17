@@ -380,7 +380,7 @@ actor GMClient {
         p.userInitiated = userInitiated
         let resp = try await send(p)
         guard let d = resp.decrypted else { return Resp() }
-        return try Resp(serializedData: d)
+        return MissingIDs.fill(try Resp(serializedData: d))
     }
 
     private func wait(_ w: Waiter, id: String, timeout: TimeInterval) async throws -> IncomingRPC {
@@ -612,7 +612,8 @@ actor GMClient {
             emit(.loggedOut)
             return
         }
-        guard let bytes = msg.decrypted, let ev = try? GMUpdateEvents(serializedData: bytes) else { return }
+        guard let bytes = msg.decrypted, let parsed = try? GMUpdateEvents(serializedData: bytes) else { return }
+        let ev = MissingIDs.fill(parsed)
         switch ev.event {
         case .conversationEvent(let ce)?:
             for c in ce.data {
