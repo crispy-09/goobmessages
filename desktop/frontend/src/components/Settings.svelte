@@ -74,5 +74,5 @@
   .actions { display: flex; justify-content: flex-end; gap: 8px; }
   .danger { color: var(--danger); }
   .version { margin-right: auto; align-self: center; font-size: 11.5px; color: var(--text-3); }
-  .danger-fill { background: var(--danger); }
+  .danger-fill { background: var(--danger); color: var(--on-danger); }
 </style>

@@ -1,6 +1,7 @@
 :root {
   --blue: #0a7cff;
   --blue-top: #3398ff;
+  --on-blue: #ffffff; /* text and icons on the accent color */
   --bg: #ffffff;
   --sidebar: #f2f2f4;
   --sidebar-border: #dedee2;
@@ -15,6 +16,7 @@
   --banner: #fff4d6;
   --banner-text: #6b4e00;
   --danger: #ff3b30;
+  --on-danger: #ffffff;
   --shadow: 0 10px 40px rgba(0, 0, 0, 0.18);
   --radius: 18px;
   color-scheme: light;
@@ -76,7 +78,7 @@ input, textarea { font: inherit; color: inherit; }
 .icon-btn svg { width: 18px; height: 18px; }
 
 .primary {
-  border: none; border-radius: 10px; background: var(--blue); color: white; padding: 9px 18px; font-weight: 600;
+  border: none; border-radius: 10px; background: var(--blue); color: var(--on-blue); padding: 9px 18px; font-weight: 600;
 }
 .primary:hover { filter: brightness(1.08); }
 .primary:disabled { opacity: 0.5; cursor: default; }

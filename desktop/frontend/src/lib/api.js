@@ -42,6 +42,7 @@ export const api = {
   contacts: () => call('Contacts'),
   getPrefs: () => call('GetPrefs'),
   version: () => call('Version'),
+  userThemeCSS: () => call('UserThemeCSS'),
   setPrefs: (p) => call('SetPrefs', p),
 }
 

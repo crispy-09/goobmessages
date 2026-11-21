@@ -127,8 +127,8 @@
   .to:focus-within { border-color: var(--blue); }
   .label { font-size: 12px; color: var(--text-2); }
   .to input { flex: 1; min-width: 140px; border: none; background: transparent; outline: none; padding: 3px 2px; user-select: text; color: var(--text); }
-  .chip { display: inline-flex; align-items: center; gap: 3px; background: var(--blue); color: white; border-radius: 12px; padding: 2px 4px 2px 9px; font-size: 13px; }
-  .chip button { border: none; background: none; color: white; padding: 0 4px; font-size: 15px; line-height: 1; }
+  .chip { display: inline-flex; align-items: center; gap: 3px; background: var(--blue); color: var(--on-blue); border-radius: 12px; padding: 2px 4px 2px 9px; font-size: 13px; }
+  .chip button { border: none; background: none; color: var(--on-blue); padding: 0 4px; font-size: 15px; line-height: 1; }
   .list { max-height: 280px; min-height: 120px; overflow-y: auto; margin: 8px -6px 0; }
   .contact { display: flex; gap: 10px; align-items: center; width: 100%; border: none; background: none; text-align: left; padding: 6px; border-radius: 8px; }
   .contact:hover { background: var(--hover); }

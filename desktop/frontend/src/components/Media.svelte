@@ -202,7 +202,7 @@
     display: flex; align-items: center; gap: 6px; border: none; background: var(--received); color: var(--received-text);
     padding: 9px 13px; border-radius: 16px; max-width: 300px; text-align: left;
   }
-  .me .file { background: linear-gradient(var(--blue-top), var(--blue)); color: white; }
+  .me .file { background: linear-gradient(var(--blue-top), var(--blue)); color: var(--on-blue); }
   .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file small { opacity: 0.7; flex: none; }
   .pending { opacity: 0.75; }
@@ -210,7 +210,7 @@
   .err { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
   .err > span { display: flex; flex-direction: column; min-width: 0; }
   .why { opacity: 0.7; font-size: 11px; overflow-wrap: anywhere; }
-  .retry { border: none; background: var(--blue); color: white; border-radius: 10px; padding: 3px 10px; font-size: 12px; flex: none; }
+  .retry { border: none; background: var(--blue); color: var(--on-blue); border-radius: 10px; padding: 3px 10px; font-size: 12px; flex: none; }
   .spinner.big { width: 20px; height: 20px; border-color: var(--text-3); border-top-color: transparent; }
   .spinner { width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg) } }

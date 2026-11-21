@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Store is the in-memory state (nothing is cached to disk). Safe for concurrent use.
+// Store is the in-memory state (opened conversations are also saved by internal/msgcache). Safe for concurrent use.
 type Store struct {
 	mu            sync.Mutex
 	convs         map[string]Conversation
@@ -378,4 +378,63 @@ func maxI(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// NewestTimestamp is the newest non-local message's time in a tracked conversation (0 if none).
+func (s *Store) NewestTimestamp(cid string) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var ts int64
+	for _, m := range s.messages[cid] {
+		if !m.Local && m.Timestamp > ts {
+			ts = m.Timestamp
+		}
+	}
+	return ts
+}
+
+// SyncNewest merges the newest page fetched from the phone into a conversation restored from the disk cache.
+// Stored messages inside the page's time range that the page doesn't contain were deleted on the phone and are
+// dropped (complete: the page is the whole conversation, so that range starts at the beginning). Messages newer
+// than the page (received while it was being fetched) and optimistic local ones are kept.
+func (s *Store) SyncNewest(cid string, page []Message, complete bool) {
+	if len(page) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	in := make(map[string]bool, len(page))
+	lo, hi := page[0].Timestamp, page[0].Timestamp
+	for _, m := range page {
+		in[m.ID] = true
+		lo, hi = min(lo, m.Timestamp), max(hi, m.Timestamp)
+	}
+	var list []Message
+	for _, m := range s.messages[cid] {
+		if !m.Local && !in[m.ID] && (complete || m.Timestamp >= lo) && m.Timestamp <= hi {
+			continue
+		}
+		list = append(list, m)
+	}
+	for _, m := range page {
+		list = mergeInto(list, m)
+	}
+	s.messages[cid] = normalize(list)
+}
+
+// ReplaceHistory drops a conversation's fetched messages (keeping optimistic local ones) and starts over from page.
+// Used when the cached history no longer connects to what the phone has now.
+func (s *Store) ReplaceHistory(cid string, page []Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var list []Message
+	for _, m := range s.messages[cid] {
+		if m.Local {
+			list = append(list, m)
+		}
+	}
+	for _, m := range page {
+		list = mergeInto(list, m)
+	}
+	s.messages[cid] = normalize(list)
 }
