@@ -342,7 +342,7 @@
     box-shadow: var(--shadow); padding: 5px; display: flex; flex-direction: column; min-width: 210px;
   }
   .menu > button { border: none; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; }
-  .menu > button:hover { background: var(--blue); color: white; }
+  .menu > button:hover { background: var(--blue); color: var(--on-blue); }
   .menu .danger { color: var(--danger); }
   .quick { display: flex; justify-content: space-between; padding: 2px 2px 6px; border-bottom: 1px solid var(--sidebar-border); margin-bottom: 4px; }
   .quick button { border: none; background: none; font-size: 20px; width: 32px; height: 32px; border-radius: 50%; padding: 0; }

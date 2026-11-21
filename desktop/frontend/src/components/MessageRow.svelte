@@ -97,7 +97,7 @@
     white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; background: var(--received); color: var(--received-text);
     margin: 0 5px; max-width: 100%; z-index: 0; /* stacking context: the tail paints under the text */
   }
-  .me .bubble { background: linear-gradient(var(--blue-top), var(--blue)); background-attachment: fixed; color: white; }
+  .me .bubble { background: linear-gradient(var(--blue-top), var(--blue)); background-attachment: fixed; color: var(--on-blue); }
   .bubble.subject { padding-bottom: 4px; }
   .bubble.failed { opacity: 0.6; }
   .bubble a { color: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }

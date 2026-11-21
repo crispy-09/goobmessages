@@ -5,6 +5,7 @@ package main
 import (
 	"embed"
 	"log"
+	goruntime "runtime"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -22,12 +23,21 @@ var icon []byte
 func main() {
 	setupLogFile()
 	app := NewApp()
+	// Linux: with no MaxWidth/MaxHeight, Wails sets GTK's max-size hint to the monitor size. After the window is
+	// hidden to the tray and shown again, Hyprland maps it at that max size and floats it (tested on Hyprland
+	// 0.57). An explicit, very large max keeps it tiled.
+	maxW, maxH := 0, 0
+	if goruntime.GOOS == "linux" {
+		maxW, maxH = 1<<15, 1<<15
+	}
 	err := wails.Run(&options.App{
 		Title:            "Messages",
 		Width:            1040,
 		Height:           720,
 		MinWidth:         640,
 		MinHeight:        420,
+		MaxWidth:         maxW,
+		MaxHeight:        maxH,
 		AssetServer:      &assetserver.Options{Assets: assets, Handler: app.mediaSrv.handler(app)},
 		BackgroundColour: &options.RGBA{R: 255, G: 255, B: 255, A: 0},
 		OnStartup:        app.startup,

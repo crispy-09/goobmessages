@@ -25,6 +25,7 @@ import (
 	"go.mau.fi/util/exhttp"
 
 	"github.com/goobmessages/desktop/internal/model"
+	"github.com/goobmessages/desktop/internal/msgcache"
 	"github.com/goobmessages/desktop/internal/storage"
 	"github.com/goobmessages/desktop/internal/urlsafe"
 )
@@ -42,6 +43,10 @@ const (
 	maxDownloadBytes   = 150 << 20
 	mediaCacheBytes    = 256 << 20
 	pageSize           = 40
+	// On-disk message cache (internal/msgcache): newest messages kept per conversation, and the total size.
+	cacheMessagesPerConv = 1000
+	cacheBytes           = 64 << 20
+	cacheSaveDelay       = 3 * time.Second
 )
 
 type Status struct {
@@ -81,6 +86,9 @@ type App struct {
 	loading       map[string]chan struct{} // in-flight history loads per conversation
 
 	mediaCache *byteLRU
+	msgCache   *msgcache.Cache
+	cacheMu    sync.Mutex
+	cacheSave  map[string]*time.Timer // debounced cache writes per conversation (guarded by cacheMu)
 	mediaSrv   *mediaServer
 	tray       trayHandle
 	previews   *previewStore
@@ -96,6 +104,8 @@ func NewApp() *App {
 		markReadTimer: map[string]*time.Timer{},
 		typingSentAt:  map[string]time.Time{},
 		mediaCache:    newByteLRU(mediaCacheBytes),
+		msgCache:      msgcache.New(messageCacheDir(), cacheMessagesPerConv, cacheBytes),
+		cacheSave:     map[string]*time.Timer{},
 		mediaSrv:      newMediaServer(),
 		previews:      newPreviewStore(),
 		status:        Status{Phase: PhaseLoading},
@@ -126,6 +136,8 @@ func (a *App) startup(ctx context.Context) {
 	startWebviewGuard()
 	startNotifClickWatcher()
 	go a.watchSleep()
+	go a.watchTheme()
+	go a.unlockMessageCache()
 
 	auth, err := storage.LoadSession()
 	if err != nil {
@@ -147,6 +159,7 @@ func (a *App) shutdown(ctx context.Context) {
 	if cli != nil {
 		cli.Disconnect()
 	}
+	a.flushCacheSaves()
 	a.notif.Stop()
 	if a.tray != nil {
 		a.tray.Close()
@@ -355,6 +368,7 @@ func (a *App) loggedOut(reason string) {
 		cli.Disconnect()
 	}
 	_ = storage.DeleteSession()
+	a.resetMessageCache()
 	a.store.Reset()
 	a.mediaCache.Reset()
 	a.mediaSrv.reset()
@@ -550,7 +564,7 @@ func (a *App) handleEvent(raw any) {
 		a.sims = evt.GetSIMCards()
 		a.mu.Unlock()
 	case *gmproto.Conversation:
-		a.store.UpsertConversation(model.ConvertConversation(evt))
+		a.upsertConversation(model.ConvertConversation(evt))
 		a.avatar.RequestFor(model.ConvertConversation(evt))
 		a.emitConversations()
 	case *libgm.WrappedMessage:
@@ -637,7 +651,7 @@ func (a *App) fetchConversation(cid string) {
 		return
 	}
 	vm := model.ConvertConversation(c)
-	a.store.UpsertConversation(vm)
+	a.upsertConversation(vm)
 	a.avatar.RequestFor(vm)
 	a.emitConversations()
 }
@@ -663,7 +677,7 @@ func (a *App) refreshConversations(force bool) {
 		}
 		for _, c := range resp.GetConversations() {
 			vm := model.ConvertConversation(c)
-			a.store.UpsertConversation(vm)
+			a.upsertConversation(vm)
 			a.avatar.RequestFor(vm)
 		}
 	}
@@ -688,6 +702,7 @@ func (a *App) emitConversations() {
 
 func (a *App) emitMessages(cid string) {
 	runtime.EventsEmit(a.ctx, "messages", map[string]any{"conversationId": cid, "messages": a.store.Messages(cid)})
+	a.scheduleCacheSave(cid)
 }
 
 // ---------------------------------------------------------------- notification actions
@@ -741,6 +756,9 @@ func (a *App) SetViewing(cid string, focused bool) {
 // OpenConversation returns the loaded messages, fetching the first page if needed.
 func (a *App) OpenConversation(cid string) ([]model.Message, error) {
 	if !a.store.IsTracked(cid) {
+		if a.restoreFromCache(cid) {
+			return a.store.Messages(cid), nil
+		}
 		if _, err := a.LoadOlder(cid); err != nil {
 			return nil, err
 		}
@@ -781,24 +799,37 @@ func (a *App) loadPage(cid string) (bool, error) {
 	if cur.Done {
 		return false, nil
 	}
-	first := cur.LastItemID == ""
 	var gc *gmproto.Cursor
-	if !first {
+	if cur.LastItemID != "" {
 		gc = &gmproto.Cursor{LastItemID: cur.LastItemID, LastItemTimestamp: cur.LastItemTimestamp}
 	}
+	msgs, next, err := a.fetchPage(cid, gc)
+	if err != nil {
+		return false, err
+	}
+	a.store.AddHistory(cid, msgs)
+	done := next.GetLastItemID() == "" || len(msgs) == 0
+	a.store.SetCursor(cid, model.Cursor{LastItemID: next.GetLastItemID(), LastItemTimestamp: next.GetLastItemTimestamp(), Done: done})
+	a.emitMessages(cid)
+	return !done, nil
+}
+
+// fetchPage asks the phone for one page of messages before gc (nil: the newest page).
+func (a *App) fetchPage(cid string, gc *gmproto.Cursor) ([]model.Message, *gmproto.Cursor, error) {
+	first := gc == nil
 	// Right after connecting the phone sometimes answers the first page with nothing; retry a few times
 	// before believing the conversation is empty.
 	var resp *gmproto.ListMessagesResponse
 	for attempt := 0; ; attempt++ {
 		cli, runCtx, err := a.client()
 		if err != nil {
-			return false, err
+			return nil, nil, err
 		}
 		ctx, cancel := context.WithTimeout(runCtx, 45*time.Second)
 		resp, err = cli.FetchMessages(ctx, cid, pageSize, gc)
 		cancel()
 		if err != nil {
-			return false, err
+			return nil, nil, err
 		}
 		if len(resp.GetMessages()) > 0 || !first || attempt >= 3 {
 			break
@@ -811,12 +842,7 @@ func (a *App) loadPage(cid string) (bool, error) {
 	for _, m := range resp.GetMessages() {
 		msgs = append(msgs, model.ConvertMessage(m, conv.MyID))
 	}
-	a.store.AddHistory(cid, msgs)
-	next := resp.GetCursor()
-	done := next.GetLastItemID() == "" || len(msgs) == 0
-	a.store.SetCursor(cid, model.Cursor{LastItemID: next.GetLastItemID(), LastItemTimestamp: next.GetLastItemTimestamp(), Done: done})
-	a.emitMessages(cid)
-	return !done, nil
+	return msgs, resp.GetCursor(), nil
 }
 
 // MarkRead marks the conversation read on the phone (debounced per conversation).
@@ -880,7 +906,7 @@ func (a *App) StartConversation(numbers []string) (string, error) {
 		return "", fmt.Errorf("the phone couldn't start that conversation (%s)", resp.GetStatus())
 	}
 	vm := model.ConvertConversation(c)
-	a.store.UpsertConversation(vm)
+	a.upsertConversation(vm)
 	a.avatar.RequestFor(vm)
 	a.emitConversations()
 	return vm.ID, nil
@@ -949,6 +975,7 @@ func (a *App) DeleteConversation(cid string) error {
 		return err
 	}
 	a.store.RemoveConversation(cid)
+	a.forgetCached(cid)
 	a.emitConversations()
 	return nil
 }
@@ -1183,7 +1210,7 @@ func (a *App) sendAttachment(cid, name, mime string, data []byte) error {
 		a.emitMessages(cid)
 		return err
 	}
-	media, err := cli.UploadMedia(data, name, mime)
+	media, err := cli.UploadMedia(a.ctx, data, name, mime)
 	if err != nil {
 		a.store.FailLocal(cid, tmpID)
 		a.emitMessages(cid)

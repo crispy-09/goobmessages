@@ -91,8 +91,22 @@ npm run dev  # then open http://localhost:5173/?mock to preview the UI with fake
 ## Where things are stored
 - Session keys (needed to stay paired) and settings: `~/.config/GoobMessages/` on Linux,
   `%AppData%\GoobMessages\` on Windows (owner-only file permissions). **Treat `session.json` like a password.**
-- Messages, attachments and avatars are kept **in memory only**; nothing is cached to disk.
-- Settings → Unpair this computer removes the pairing from your phone and deletes the session.
+- **Message cache:** chats you open are saved to `~/.cache/GoobMessages/messages/` (Linux) or
+  `%LocalAppData%\GoobMessages\messages\` (Windows) so they show instantly next time, then sync with the phone.
+  Files are encrypted (AES-256-GCM) with a key kept in the system keyring (Secret Service on Linux, e.g.
+  gnome-keyring or KWallet; Credential Manager on Windows). If the keyring is locked, its unlock prompt appears once
+  per login; with no keyring the cache is simply off. Owner-only files, newest 1000 messages per chat, 64 MB in
+  total (least recently opened chats are dropped first).
+  Attachments sent inside a message are kept up to 512 KB each; other attachments and avatars stay in memory only.
+- Settings → Unpair this computer removes the pairing from your phone and deletes the session, the message cache and its key.
+- **Theme:** an optional `theme.css` in the settings folder overrides the color variables in
+  `frontend/src/style.css` and is reloaded live. `contrib/matugen/theme.css` is a [matugen](https://github.com/InioX/matugen)
+  template for it: add to `~/.config/matugen/config.toml`
+  ```toml
+  [templates.goobmessages]
+  input_path = '~/.config/matugen/templates/goobmessages/theme.css'  # a copy of contrib/matugen/theme.css
+  output_path = '~/.config/GoobMessages/theme.css'
+  ```
 
 ## Layout
 ```

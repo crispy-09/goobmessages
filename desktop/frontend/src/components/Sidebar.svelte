@@ -151,8 +151,8 @@
     padding: 9px 8px 9px 2px; border-radius: 10px; position: relative;
   }
   .row:hover { background: var(--hover); }
-  .row.selected { background: var(--blue); color: white; }
-  .row.selected .preview, .row.selected .time { color: rgba(255, 255, 255, 0.82); }
+  .row.selected { background: var(--blue); color: var(--on-blue); }
+  .row.selected .preview, .row.selected .time { color: color-mix(in srgb, var(--on-blue) 82%, transparent); }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .dot.on { background: var(--blue); }
   .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -161,7 +161,7 @@
   .muted { font-size: 11px; }
   .pin { color: var(--text-3); flex: none; display: inline-flex; align-self: center; }
   .pin svg { width: 11px; height: 11px; }
-  .row.selected .pin { color: rgba(255, 255, 255, 0.82); }
+  .row.selected .pin { color: color-mix(in srgb, var(--on-blue) 82%, transparent); }
   .time { font-size: 12px; color: var(--text-2); flex: none; }
   .preview {
     color: var(--text-2); font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2;
@@ -176,8 +176,8 @@
     box-shadow: var(--shadow); padding: 5px; display: flex; flex-direction: column; min-width: 170px;
   }
   .menu button { border: none; background: none; text-align: left; padding: 6px 10px; border-radius: 6px; }
-  .menu button:hover { background: var(--blue); color: white; }
+  .menu button:hover { background: var(--blue); color: var(--on-blue); }
   .menu .danger { color: var(--danger); }
-  .menu .danger-fill { background: var(--danger); color: white; font-weight: 600; }
+  .menu .danger-fill { background: var(--danger); color: var(--on-danger); font-weight: 600; }
   .sepline { height: 1px; background: var(--sidebar-border); margin: 4px 2px; }
 </style>

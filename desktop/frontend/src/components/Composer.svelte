@@ -112,7 +112,7 @@
         ></textarea>
         {#if text.trim()}
           <button class="send" aria-label="Send" title="Send" onclick={send}>
-            <svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" fill="none" stroke="white" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         {/if}
       </div>
@@ -134,7 +134,7 @@
     max-height: 160px; overflow-y: auto; user-select: text; -webkit-user-select: text;
   }
   textarea::placeholder { color: var(--text-3); }
-  .send { width: 27px; height: 27px; border-radius: 50%; border: none; background: var(--blue); display: grid; place-items: center; padding: 0; flex: none; }
+  .send { width: 27px; height: 27px; border-radius: 50%; border: none; background: var(--blue); color: var(--on-blue); display: grid; place-items: center; padding: 0; flex: none; }
   .send svg { width: 17px; height: 17px; }
   .reply { display: flex; align-items: center; gap: 8px; margin: 0 0 6px 40px; font-size: 12.5px; color: var(--text-2); }
   .bar { width: 3px; align-self: stretch; background: var(--blue); border-radius: 2px; }

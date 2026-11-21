@@ -101,11 +101,12 @@ protocol notes above (pblite, crypto, long-poll) are libgm's job there. Read `de
   (`wails build -tags webkit2_41`); Windows builds are pure Go (cross-compile with `-platform windows/amd64`).
 * Same rules as the Mac app: notifications only via `Notifier.Enqueue` (planner in `internal/model/planner.go`),
   reconnects only via `App.scheduleReconnect`, libgm's event handler must not block (spawn goroutines for RPCs),
-  untrusted URLs through `internal/urlsafe`, no message content on disk, never `{@html}` in Svelte.
+  untrusted URLs through `internal/urlsafe`, message content on disk only through `internal/msgcache` (encrypted,
+  key in the OS keyring, owner-only, capped, cleared with its key on unpair), never `{@html}` in Svelte.
 * Bump `go.mau.fi/mautrix-gmessages` to pick up protocol fixes; keep the CI Wails CLI version equal to `go.mod`'s.
 
 ## Ideas / known gaps
 Stickers/GIF picker, sending location, scheduled send, server-side full-text search (find only searches loaded
-messages), persistent offline cache (deliberately absent: nothing is cached to disk), mute state can't be read back
+messages), mute state can't be read back
 from the phone (hence local "Hide Alerts"), pin/mute/archive request shapes are untested upstream, multi-account,
 localization, Sparkle-style updates, dual-SIM picker.
