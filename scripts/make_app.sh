@@ -5,9 +5,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="Goob Message"
+APP_NAME="${APP_NAME:-Goob Message}"
 BUNDLE_ID="${BUNDLE_ID:-com.example.GMessagesMac}"   # change this if you publish your own build
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-1.2.0}"
 OUT="build/${APP_NAME}.app"
 
 echo "▶ Building (release, universal)…"

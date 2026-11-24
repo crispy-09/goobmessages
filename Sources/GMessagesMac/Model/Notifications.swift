@@ -82,6 +82,17 @@ enum NotificationPlanner {
         }
     }
 
+    /// Drops alerts for conversations the phone now reports as read (the backlog after launch/reconnect often holds
+    /// messages you already read on the phone). `isUnread` returns nil when the conversation is unknown: keep those.
+    static func dropRead(_ alerts: [NotificationAlert], isUnread: (String) -> Bool?) -> [NotificationAlert] {
+        alerts.filter { isUnread($0.conversationID) ?? true }
+    }
+
+    /// When a catch-up window closes: `quiet` seconds after the latest activity, never past the hard deadline.
+    static func catchUpEnd(lastActivity: Date, quiet: TimeInterval, deadline: Date) -> Date {
+        min(lastActivity.addingTimeInterval(quiet), deadline)
+    }
+
     private static func displayName(_ a: NotificationAlert) -> String {
         a.conversationName.isEmpty ? (a.senderName.isEmpty ? "Someone" : a.senderName) : a.conversationName
     }
@@ -100,7 +111,14 @@ final class NotificationCoordinator {
     private var flushTask: Task<Void, Never>?
     private var catchUpTask: Task<Void, Never>?
     private(set) var inCatchUp = false
+    private var catchUpDeadline = Date.distantFuture
+    private var catchUpQuiet: TimeInterval?      // set once the connection is back: end after this much silence
     private var lastSoundAt = Date.distantPast
+    /// Current unread state of a conversation per the phone (nil = unknown). Set by AppModel.
+    var isUnread: ((String) -> Bool?)?
+
+    static let maxCatchUp: TimeInterval = 45
+    static let lateBacklogQuiet: TimeInterval = 4
 
     /// Registers the reply / mark-as-read actions. Call once at launch.
     nonisolated static func registerCategories() {
@@ -119,27 +137,53 @@ final class NotificationCoordinator {
         guard AppEnv.canNotify, Prefs.notificationsEnabled, !Prefs.hiddenAlerts.contains(alert.conversationID) else { return }
         pending.append(alert)
         if firstPendingAt == nil { firstPendingAt = Date() }
+        if inCatchUp {
+            // Backlog still arriving: keep the window open until it has been quiet for a moment.
+            if let q = catchUpQuiet { scheduleCatchUpEnd(quiet: q) }
+            return
+        }
+        if Date().timeIntervalSince(alert.timestamp) > NotificationPlanner.staleAfter {
+            // Old messages trickling in after catch-up ended (slow phone, long backlog): hold and summarise them
+            // together instead of posting a notification for each.
+            startCatchUp(deadline: Date().addingTimeInterval(20))
+            catchUpQuiet = Self.lateBacklogQuiet
+            scheduleCatchUpEnd(quiet: Self.lateBacklogQuiet)
+            return
+        }
         scheduleFlush()
     }
 
     /// Start holding alerts (launch, sleep, reconnect). They are summarised when catch-up ends.
+    /// Repeated calls (every retry of a failing connection) keep the original deadline, so alerts are never held
+    /// longer than `maxCatchUp`.
     func beginCatchUp() {
-        inCatchUp = true
-        flushTask?.cancel()
-        catchUpTask?.cancel()
-        catchUpTask = Task { [weak self] in          // safety net: never hold alerts forever
-            try? await Task.sleep(nanoseconds: 45_000_000_000)
-            guard !Task.isCancelled else { return }
-            self?.finishCatchUp()
-        }
+        if !inCatchUp { startCatchUp(deadline: Date().addingTimeInterval(Self.maxCatchUp)) }
+        catchUpQuiet = nil
+        scheduleCatchUpEnd(at: catchUpDeadline)       // safety net: never hold alerts forever
     }
 
-    /// Called once the connection is back; waits briefly for the backlog to finish arriving.
+    /// Called once the connection is back; ends catch-up after `seconds` without new alerts.
     func endCatchUp(after seconds: Double) {
         guard inCatchUp else { return }
+        catchUpQuiet = seconds
+        scheduleCatchUpEnd(quiet: seconds)
+    }
+
+    private func startCatchUp(deadline: Date) {
+        inCatchUp = true
+        catchUpDeadline = deadline
+        flushTask?.cancel()
+    }
+
+    private func scheduleCatchUpEnd(quiet: TimeInterval) {
+        scheduleCatchUpEnd(at: NotificationPlanner.catchUpEnd(lastActivity: Date(), quiet: quiet, deadline: catchUpDeadline))
+    }
+
+    private func scheduleCatchUpEnd(at date: Date) {
         catchUpTask?.cancel()
+        let delay = max(date.timeIntervalSinceNow, 0)
         catchUpTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled else { return }
             self?.finishCatchUp()
         }
@@ -183,12 +227,15 @@ final class NotificationCoordinator {
     private func finishCatchUp() {
         guard inCatchUp else { return }
         inCatchUp = false
+        catchUpQuiet = nil
+        catchUpDeadline = .distantFuture
         catchUpTask = nil
         flush(catchUp: true)
     }
 
     private func flush(catchUp: Bool) {
-        let alerts = pending
+        var alerts = pending
+        if let isUnread { alerts = NotificationPlanner.dropRead(alerts, isUnread: isUnread) }
         pending = []
         firstPendingAt = nil
         let plan = NotificationPlanner.plan(alerts, catchUp: catchUp, now: Date(), previews: Prefs.notificationPreviews)

@@ -35,6 +35,12 @@ Windows). Protocol fixes come from upstream by bumping one dependency.
 ## Download
 Prebuilt Linux (x86-64) and Windows (x64) builds are on the
 [releases page](https://github.com/crispy-09/goobmessages/releases) (tags starting with `desktop-v`).
+
+**Easiest: one command that installs and, run again, updates** (checks the download's SHA-256 first):
+- **Linux:** `curl -fsSL https://raw.githubusercontent.com/crispy-09/goobmessages/main/scripts/install.sh | bash`
+- **Windows** (PowerShell): `irm https://raw.githubusercontent.com/crispy-09/goobmessages/main/scripts/install.ps1 | iex`
+
+Or by hand:
 - **Linux:** extract `goobmessages-<version>-linux-amd64.tar.gz` and run `./install.sh` (installs to `~/.local/bin`
   plus an app-menu launcher; needs WebKitGTK 4.1 and the GStreamer plugins listed under *Build from source → Linux*: without them
   opening a chat with a video or voice message crashes the window).

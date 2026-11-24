@@ -8,7 +8,7 @@ struct SettingsView: View {
             NotificationSettings().tabItem { Label("Notifications", systemImage: "bell.badge") }
             AccountSettings().tabItem { Label("Account", systemImage: "person.crop.circle") }
         }
-        .frame(width: 480, height: 380)
+        .frame(width: 480, height: 460)
     }
 }
 
@@ -16,6 +16,8 @@ private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.sendOnReturn) private var sendOnReturn = true
     @AppStorage(Prefs.Key.linkPreviewMode) private var previewMode: LinkPreviewMode = Prefs.linkPreviewMode
     @AppStorage(Prefs.Key.showMenuBarIcon) private var showMenuBarIcon = false
+    @AppStorage(Prefs.Key.dockIconMode) private var dockMode: DockIconMode = .always
+    @AppStorage(Prefs.Key.startInBackground) private var startInBackground = false
     @State private var openAtLogin = LoginItem.isEnabled
     @State private var loginError: String?
 
@@ -30,9 +32,17 @@ private struct GeneralSettings: View {
                         if loginError != nil { openAtLogin = LoginItem.isEnabled }
                     }
                 if let loginError { Text(loginError).font(.caption).foregroundStyle(.red) }
-                Toggle("Show in menu bar", isOn: $showMenuBarIcon)
-                Text("Adds an icon with your unread conversations, handy when the window is closed.")
+                Toggle("Start in background", isOn: $startInBackground)
+                Text("Connects and shows notifications at launch without opening the window.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Picker("Show in Dock", selection: $dockMode) {
+                    ForEach(DockIconMode.allCases) { Text($0.label).tag($0) }
+                }
+                .onChange(of: dockMode) { _ in DispatchQueue.main.async { AppPresence.update() } }
+                Toggle("Show in menu bar", isOn: $showMenuBarIcon)
+                Text(presenceHint).font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Send with Return", isOn: $sendOnReturn)
@@ -46,6 +56,16 @@ private struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var presenceHint: String {
+        var s = "Goob Message keeps running and notifying after you close its window; ⌘Q quits it."
+        if dockMode != .always && !showMenuBarIcon {
+            s += " With no Dock or menu bar icon, open it again from a notification, Spotlight or Finder."
+        } else if showMenuBarIcon {
+            s += " Click the menu bar icon to open the app; right-click it for unread conversations."
+        }
+        return s
     }
 }
 
@@ -112,51 +132,5 @@ private struct AccountSettings: View {
         .confirmationDialog("Sign out and unpair this Mac from your phone?", isPresented: $confirm) {
             Button("Sign Out", role: .destructive) { model.signOut() }
         }
-    }
-}
-
-// MARK: - Menu bar
-
-struct MenuBarLabel: View {
-    @EnvironmentObject var model: AppModel
-    var body: some View {
-        let n = model.unreadConversations.count
-        if n > 0 {
-            Label("\(n)", systemImage: "bubble.left.fill").labelStyle(.titleAndIcon)
-        } else {
-            Image(systemName: "bubble.left")
-        }
-    }
-}
-
-struct MenuBarContent: View {
-    @EnvironmentObject var model: AppModel
-
-    var body: some View {
-        let unread = model.unreadConversations
-        if unread.isEmpty {
-            Text("No unread messages")
-        } else {
-            ForEach(unread.prefix(10)) { c in
-                Button("\(c.name): \(String(c.preview.prefix(48)))") {
-                    model.select(c.id)
-                    MainWindow.show()
-                }
-            }
-            Divider()
-            Button("Mark All as Read") { model.markAllRead() }
-        }
-        Divider()
-        Button("Open Goob Message") { MainWindow.show() }
-        Button("New Message") {
-            MainWindow.show()
-            NotificationCenter.default.post(name: .newMessage, object: nil)
-        }
-        Divider()
-        Button("Settings…") {
-            NSApp.activate(ignoringOtherApps: true)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        }
-        Button("Quit Goob Message") { NSApp.terminate(nil) }
     }
 }

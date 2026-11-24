@@ -107,6 +107,10 @@ final class AppModel: ObservableObject {
     // MARK: - Launch / login
 
     func start() async {
+        notifications.isUnread = { [weak self] cid in
+            guard let self else { return nil }
+            return (self.conversations.first { $0.id == cid } ?? self.archived.first { $0.id == cid })?.unread
+        }
         installResilience()
         purgeTempMedia()
         if AppEnv.canNotify {
@@ -274,13 +278,18 @@ final class AppModel: ObservableObject {
         case .authChanged:
             if let c = client { Keychain.save(await c.auth) }
         case .connected:
-            banner = nil
-            notifications.endCatchUp(after: 4)
+            connectionRestored()
             if phase == .ready {
                 if conversations.isEmpty { Task { await loadInitial() } } else { Task { await refreshConversations() } }
             }
-        case .listenError(let s):
-            if phase == .ready && !isAsleep && !isOffline { banner = "Connection problem: \(s)" }
+        case .listenRecovered:
+            // The long poll came back on its own (no full reconnect): without this the banner stayed forever.
+            connectionRestored()
+            if phase == .ready { Task { await refreshConversations() } }
+        case .listenError:
+            // Whatever the phone queued meanwhile arrives in a burst once we're back: summarise it.
+            if !isAsleep { notifications.beginCatchUp() }
+            if phase == .ready && !isAsleep && !isOffline { banner = "Connection problem. Reconnecting…" }
         case .fatalAuthError(let s):
             errorMessage = s
             signOutLocally()
@@ -301,6 +310,13 @@ final class AppModel: ObservableObject {
         case .userAlert, .settings:
             break
         }
+    }
+
+    /// Data is flowing again, so we are online whatever NWPathMonitor last said.
+    private func connectionRestored() {
+        banner = nil
+        isOffline = false
+        notifications.endCatchUp(after: 4)
     }
 
     private func upsert(_ c: ConversationVM) {
@@ -349,8 +365,8 @@ final class AppModel: ObservableObject {
                 conversations[i].preview = vm.summaryText
                 conversations[i].timestamp = max(conversations[i].timestamp, vm.timestamp)
             }
-        } else if conv == nil {
-            fetchConversation(cid)
+        } else if conv == nil, phase == .ready, !loadingInitial {
+            fetchConversation(cid)            // before the first list arrives, that list will contain it anyway
         }
 
         guard !vm.isFromMe, !vm.isTombstone else { return }

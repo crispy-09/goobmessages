@@ -3,26 +3,54 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject var model: AppModel
     @State private var showNew = false
+    @State private var offlineDismissed = false
 
     var body: some View {
         NavigationSplitView {
             SidebarView(showNew: $showNew)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 420)
         } detail: {
-            if let c = model.selected { ChatView(conversation: c).id(c.id) }
-            else { Text("No Conversation Selected").font(.title3).foregroundStyle(.tertiary).frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if model.isOffline {
-                Label("You're offline. Messages will sync when you reconnect.", systemImage: "wifi.slash")
-                    .font(.callout).frame(maxWidth: .infinity).padding(6).background(Color.secondary.opacity(0.18))
-            } else if let b = model.banner {
-                Text(b).font(.callout).frame(maxWidth: .infinity).padding(6).background(.yellow.opacity(0.3))
+            // Banner lives in the chat column so it never covers the sidebar header or the title-bar controls.
+            VStack(spacing: 0) {
+                connectionBanner
+                if let c = model.selected { ChatView(conversation: c).id(c.id) }
+                else { Text("No Conversation Selected").font(.title3).foregroundStyle(.tertiary).frame(maxWidth: .infinity, maxHeight: .infinity) }
             }
         }
+        .onChange(of: model.isOffline) { offline in if !offline { offlineDismissed = false } }
         .sheet(isPresented: $showNew) { NewChatView() }
         .sheet(item: $model.viewing) { MediaViewer(item: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .newMessage)) { _ in showNew = true }
+    }
+
+    @ViewBuilder private var connectionBanner: some View {
+        if model.isOffline && !offlineDismissed {
+            StatusBanner(text: "You're offline. Messages will sync when you reconnect.", icon: "wifi.slash",
+                         tint: Color.secondary.opacity(0.18)) { offlineDismissed = true }
+        } else if let b = model.banner, !model.isOffline {
+            StatusBanner(text: b, icon: nil, tint: .yellow.opacity(0.3)) { model.banner = nil }
+        }
+    }
+}
+
+/// Connection banner above the chat. Always dismissible: it also clears itself when the connection recovers.
+private struct StatusBanner: View {
+    let text: String
+    let icon: String?
+    let tint: Color
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Spacer(minLength: 24)
+            if let icon { Image(systemName: icon) }
+            Text(text)
+            Spacer(minLength: 0)
+            Button(action: dismiss) { Image(systemName: "xmark").font(.caption.weight(.semibold)) }
+                .buttonStyle(.plain).foregroundStyle(.secondary).help("Dismiss").accessibilityLabel("Dismiss")
+                .padding(.trailing, 4)
+        }
+        .font(.callout).padding(6).frame(maxWidth: .infinity).background(tint)
     }
 }
 
