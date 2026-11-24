@@ -5,7 +5,7 @@ Run from repo root: python3 tools/make_icon.py            (writes Resources/)
 
 Everything is built from sampled parametric curves at 4096 px and downsampled, so edges are smooth:
 a continuous-curvature squircle (superellipse) body on Apple's 824/1024 icon grid with the standard drop shadow,
-and a speech bubble whose curved tail is blended into the body (blur + threshold fillet) instead of a hard triangle.
+and a plain rounded-rectangle speech bubble (matching the menu bar glyph) whose tail is filleted into it (blur + threshold).
 """
 import math, os, sys
 from PIL import Image, ImageDraw, ImageFilter, ImageChops
@@ -115,44 +115,38 @@ def render():
     bg = Image.composite(Image.new("RGBA", (S, S), (255, 255, 255, 255)), bg, glow.point(lambda v: v * 0.22))
     canvas.paste(bg, (0, 0), body)
 
-    # --- bubble: superellipse body + curved tail, filleted together
-    cx, cy = S / 2, 480 * U
-    a, b = 292 * U, 226 * U
-    n = 2.35
-    blob = superellipse(cx, cy, a, b, n)
-    # Tail: two cubics leaving the bubble outline tangentially (G1), so it reads as one shape. y grows downward,
-    # so t in (90deg, 180deg) is the lower-left quarter; decreasing t walks toward the bottom centre.
-    t_out, t_in = math.radians(166), math.radians(118)
-    p_out, p_in = se_point(cx, cy, a, b, n, t_out), se_point(cx, cy, a, b, n, t_in)
-    d_out, d_in = se_tangent(cx, cy, a, b, n, t_out, -1), se_tangent(cx, cy, a, b, n, t_in, -1)
-    tip = (cx - 262 * U, cy + b + 44 * U)
-    outer = cubic(p_out, (p_out[0] + d_out[0] * 80 * U, p_out[1] + d_out[1] * 80 * U),
-                  (tip[0] - 4 * U, tip[1] - 34 * U), tip)
-    inner = cubic(tip, (tip[0] + 46 * U, tip[1] - 2 * U),
-                  (p_in[0] - d_in[0] * 55 * U, p_in[1] - d_in[1] * 55 * U), p_in)
-    tail = outer + inner + [(cx - 60 * U, cy)]           # close through the bubble's interior
-    bubble = smooth(mask_from([blob, tail]), 7 * U)
+    # --- bubble: a rounded rectangle with a short tail under its bottom-left, the same silhouette as the menu bar
+    # glyph: the tail's left side drops straight down, its right side runs diagonally back into the bottom edge.
+    x0, y0, x1, y1 = 242 * U, 254 * U, 782 * U, 664 * U
+    rect = continuous_rect(x0, y0, x1, y1, 160 * U)
+    tx, tip_y, back_x, r = x0 + 120 * U, y1 + 110 * U, x0 + 270 * U, 24 * U
+    c = (tx + r, tip_y - r)                               # rounded tip
+    dx, dy = back_x - c[0], y1 - c[1]
+    d = math.hypot(dx, dy)
+    base, off = math.atan2(dy, dx), math.acos(r / d)
+    cands = [(c[0] + r * math.cos(base + k * off), c[1] + r * math.sin(base + k * off)) for k in (-1, 1)]
+    tan_pt = max(cands, key=lambda q: q[0] + q[1])
+    a0 = math.pi                                          # from the left side of the tip circle...
+    a1 = math.atan2(tan_pt[1] - c[1], tan_pt[0] - c[0])   # ...round the bottom to the tangent point
+    if a1 < a0:
+        a1 += 2 * math.pi
+    a1 -= 2 * math.pi if a1 - a0 > math.pi * 1.5 else 0
+    arc = [(c[0] + r * math.cos(a0 + (a1 - a0) * i / 60), c[1] + r * math.sin(a0 + (a1 - a0) * i / 60)) for i in range(61)]
+    arc = arc if arc[30][1] > c[1] else [(c[0] + r * math.cos(t), c[1] + r * math.sin(t))
+                                         for t in [a0 - (a0 - (a1 - 2 * math.pi)) * i / 60 for i in range(61)]]
+    tail = [(tx, y1 - 40 * U), (tx, c[1])] + arc + [(back_x, y1), (back_x, y1 - 40 * U)]
+    bubble = smooth(mask_from([rect, tail]), 9 * U)
 
     # bubble shadow (soft, slightly below)
     bs = Image.new("RGBA", (S, S), (0, 20, 80, 0))
-    bs.putalpha(bubble.point(lambda v: v * 0.28))
+    bs.putalpha(bubble.point(lambda v: v * 0.26))
     bs = bs.filter(ImageFilter.GaussianBlur(22 * U)).transform((S, S), Image.AFFINE, (1, 0, 0, 0, 1, -16 * U))
     canvas = Image.alpha_composite(canvas, Image.composite(bs, Image.new("RGBA", (S, S), (0, 0, 0, 0)), body))
 
-    fill = gradient((255, 255, 255), (226, 238, 255), 90)
+    fill = gradient((255, 255, 255), (228, 239, 255), 90)
     layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     layer.paste(fill, (0, 0), bubble)
     canvas = Image.alpha_composite(canvas, layer)
-
-    # --- typing dots, same gradient as the background so they read as "cut out"
-    dots = Image.new("L", (S, S), 0)
-    d = ImageDraw.Draw(dots)
-    r = 38 * U
-    for i in (-1, 0, 1):
-        x = cx + i * 118 * U
-        d.ellipse((x - r, cy - r, x + r, cy + r), fill=255)
-    dot_fill = gradient((56, 150, 255), (18, 92, 235), 90)
-    canvas.paste(dot_fill, (0, 0), dots)
 
     return canvas.resize((1024, 1024), Image.LANCZOS)
 

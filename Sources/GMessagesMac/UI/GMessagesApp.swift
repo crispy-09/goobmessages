@@ -13,7 +13,11 @@ enum AppEnv {
 /// like Apple's Messages. Forwards everything else to SwiftUI's own window delegate.
 final class WindowHider: NSObject, NSWindowDelegate {
     weak var original: NSWindowDelegate?
-    func windowShouldClose(_ sender: NSWindow) -> Bool { sender.orderOut(nil); return false }
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        AppPresence.update()
+        return false
+    }
     override func responds(to aSelector: Selector!) -> Bool { super.responds(to: aSelector) || (original?.responds(to: aSelector) ?? false) }
     override func forwardingTarget(for aSelector: Selector!) -> Any? {
         (original?.responds(to: aSelector) ?? false) ? original : super.forwardingTarget(for: aSelector)
@@ -24,6 +28,7 @@ enum MainWindow {
     static weak var window: NSWindow?
     static let hider = WindowHider()
     static func show() {
+        AppPresence.update(showingWindow: true)
         NSApp.activate(ignoringOtherApps: true)
         guard let w = window else { return }
         if w.isMiniaturized { w.deminiaturize(nil) }
@@ -36,24 +41,61 @@ struct WindowAccessor: NSViewRepresentable {
         let v = NSView()
         DispatchQueue.main.async {
             guard let w = v.window, MainWindow.window !== w else { return }
+            let first = MainWindow.window == nil
             MainWindow.window = w
             if w.delegate !== MainWindow.hider { MainWindow.hider.original = w.delegate; w.delegate = MainWindow.hider }
             w.isReleasedWhenClosed = false
+            // "Start in background": the window (and RootView's .task that connects) is created, then hidden at once.
+            if first, Prefs.startInBackground { w.orderOut(nil) }
+            AppPresence.update()
         }
         return v
     }
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+/// Switches between a regular app (Dock icon + menu bar) and a background accessory app according to
+/// `Prefs.dockIconMode` and whether any real window (main window, Settings) is open.
+enum AppPresence {
+    private static var observers: [NSObjectProtocol] = []
+
+    static func install() {
+        let nc = NotificationCenter.default
+        let names: [Notification.Name] = [NSWindow.didBecomeKeyNotification, NSWindow.willCloseNotification,
+                                          NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification]
+        // Async: on willClose the window is still visible.
+        observers = names.map { nc.addObserver(forName: $0, object: nil, queue: .main) { _ in DispatchQueue.main.async { update() } } }
+    }
+
+    private static var hasOpenWindow: Bool {
+        NSApp.windows.contains { w in
+            !(w is NSPanel) && w.styleMask.contains(.titled) && (w.isVisible || w.isMiniaturized)
+        }
+    }
+
+    static func update(showingWindow: Bool = false) {
+        let wantDock = Prefs.dockIconMode.showsDockIcon(hasOpenWindow: showingWindow || hasOpenWindow)
+        let policy: NSApplication.ActivationPolicy = wantDock ? .regular : .accessory
+        guard NSApp.activationPolicy() != policy else { return }
+        NSApp.setActivationPolicy(policy)
+        // Without this the menu bar can stay on the previous app after becoming .regular again.
+        if wantDock, showingWindow || NSApp.isActive { NSApp.activate(ignoringOtherApps: true) }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        let background = Prefs.startInBackground
+        NSApp.setActivationPolicy(Prefs.dockIconMode.showsDockIcon(hasOpenWindow: !background) ? .regular : .accessory)
+        if !background { NSApp.activate(ignoringOtherApps: true) }
+        AppPresence.install()
+        StatusItemController.shared.install(model: AppModel.shared)
         if AppEnv.canNotify { UNUserNotificationCenter.current().delegate = self }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// Dock click, or launching the app again from Finder/Spotlight (the way back when there is no Dock/menu bar icon).
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         MainWindow.show()
         return true
@@ -87,7 +129,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 struct GMessagesApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = AppModel.shared
-    @AppStorage(Prefs.Key.showMenuBarIcon) private var showMenuBarIcon = false
 
     var body: some Scene {
         WindowGroup("Goob Message") {
@@ -126,11 +167,6 @@ struct GMessagesApp: App {
 
         Settings { SettingsView().environmentObject(model) }
 
-        MenuBarExtra(isInserted: $showMenuBarIcon) {
-            MenuBarContent().environmentObject(model)
-        } label: {
-            MenuBarLabel().environmentObject(model)
-        }
     }
 }
 

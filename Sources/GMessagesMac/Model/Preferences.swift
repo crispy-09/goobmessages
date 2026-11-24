@@ -12,6 +12,8 @@ enum Prefs {
         static let linkPreviewMode = "linkPreviewMode"
         static let sendOnReturn = "sendOnReturn"
         static let showMenuBarIcon = "showMenuBarIcon"
+        static let dockIconMode = "dockIconMode"
+        static let startInBackground = "startInBackground"
         static let hiddenAlerts = "hiddenAlertConversationIDs"
     }
 
@@ -29,6 +31,11 @@ enum Prefs {
         return bool(Key.linkPreviews, default: true) ? .contacts : .off
     }
     static var sendOnReturn: Bool { bool(Key.sendOnReturn, default: true) }
+    static var showMenuBarIcon: Bool { bool(Key.showMenuBarIcon, default: false) }
+    static var startInBackground: Bool { bool(Key.startInBackground, default: false) }
+    static var dockIconMode: DockIconMode {
+        UserDefaults.standard.string(forKey: Key.dockIconMode).flatMap(DockIconMode.init(rawValue:)) ?? .always
+    }
 
     /// Conversations whose alerts are hidden on this Mac (like "Hide Alerts" in Apple Messages).
     /// Stored as opaque conversation IDs only, never names or numbers.
@@ -55,6 +62,28 @@ enum LinkPreviewMode: String, CaseIterable, Identifiable {
         case .everyone: return true
         case .contacts: return fromMe || senderIsContact
         case .off: return false
+        }
+    }
+}
+
+/// When the app shows a Dock icon. The app keeps running (and notifying) in every mode; closing the window only hides it.
+enum DockIconMode: String, CaseIterable, Identifiable {
+    case always, whileOpen, never
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .always: return "Always"
+        case .whileOpen: return "Only while a window is open"
+        case .never: return "Never"
+        }
+    }
+
+    /// Pure policy decision (tested): show the Dock icon (and the app's menu bar) or run as a background accessory.
+    func showsDockIcon(hasOpenWindow: Bool) -> Bool {
+        switch self {
+        case .always: return true
+        case .whileOpen: return hasOpenWindow
+        case .never: return false
         }
     }
 }
