@@ -40,6 +40,8 @@ enum GMEvent {
     case userAlert(Int)
     case connected
     case listenError(String)
+    /// The long poll reopened after errors (libgm `ListenRecovered`): clear connection banners, end catch-up.
+    case listenRecovered
     case fatalAuthError(String)
     case phoneNotResponding
     case phoneResponding
@@ -295,6 +297,8 @@ actor GMClient {
         ackTask?.cancel(); ackTask = nil
         pingTask?.cancel(); pingTask = nil
         isConnected = false
+        pingTimeouts = 0
+        notRespondingSent = false
         for (_, w) in waiters { w.deliver(.failure(GMError.connectionClosed)) }
         waiters.removeAll()
     }
@@ -318,6 +322,11 @@ actor GMClient {
         isConnected = true
         emit(.connected)
         startPinger()
+    }
+
+    /// Extra GET_UPDATES on the current session after a long-poll gap (libgm `requestUpdatesAfterGap`).
+    private func requestUpdatesAfterGap() async {
+        try? await sendNoResponse(SendParams(action: RPCAction.getUpdates, data: nil, requestID: rpcSessionID, omitTTL: true))
     }
 
     func setActiveSession() async throws {
@@ -441,7 +450,8 @@ actor GMClient {
 
     private func longPollLoop(listenID id: Int, loggedIn: Bool, onFirstConnect: (@Sendable () -> Void)?) async {
         var firstConnect = onFirstConnect
-        var errorCount = 1
+        var errorCount = 1                    // starts at 1 like libgm, so the first open also reports "recovered"
+        var disconnectedAt: Date?
         let listenReqID = UUID().uuidString
         while id == listenID && !Task.isCancelled {
             do { try await refreshAuthToken() } catch {
@@ -449,6 +459,7 @@ actor GMClient {
                     if loggedIn { emit(.fatalAuthError("Token refresh failed: \(error.localizedDescription)")) }
                     return
                 }
+                if disconnectedAt == nil { disconnectedAt = Date() }
                 if loggedIn { emit(.listenError(error.localizedDescription)) }
                 errorCount += 1
                 await Self.backoff(errorCount)
@@ -475,13 +486,24 @@ actor GMClient {
                     throw GMError.http(http.statusCode, "")
                 }
                 guard id == listenID else { return }
-                errorCount = 0
+                if errorCount > 0 {
+                    errorCount = 0
+                    if loggedIn { emit(.listenRecovered) }
+                }
+                // Events the phone sent while we were disconnected for a while may not be redelivered (libgm
+                // longPollGapCatchUp): ask for them explicitly.
+                if loggedIn, firstConnect == nil, let gap = disconnectedAt, Date().timeIntervalSince(gap) > 60 {
+                    Task { [weak self] in await self?.requestUpdatesAfterGap() }
+                }
+                disconnectedAt = nil
                 if let f = firstConnect { firstConnect = nil; f() }
                 try await readStream(bytes, listenID: id)
+                disconnectedAt = Date()
             } catch is CancellationError {
                 return
             } catch {
                 if id != listenID { return }
+                if disconnectedAt == nil { disconnectedAt = Date() }
                 if loggedIn { emit(.listenError(error.localizedDescription)) }
                 errorCount += 1
                 await Self.backoff(errorCount)
