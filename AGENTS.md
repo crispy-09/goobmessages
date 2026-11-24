@@ -12,6 +12,7 @@ brew install protobuf swift-protobuf && pip3 install grpcio-tools pillow
 swift build                # or open Package.swift in Xcode (⌘R). Xcode runs a bare executable (no notifications).
 swift test                 # PBLite + crypto + link-safety tests; must pass
 ./scripts/make_app.sh      # real .app (universal, icon, notifications work). ./scripts/make_dmg.sh for a DMG
+./scripts/install.sh       # end-user install/update from the latest release (macOS + Linux); install.ps1 for Windows
 python3 tools/make_icon.py # regenerate Resources/AppIcon.*
 ```
 There is no CI-accessible Google account: **network/protocol code cannot be integration-tested automatically.**
@@ -66,6 +67,8 @@ Views never call `GMClient` directly; go through `AppModel`.
    (plain GET), not participant thumbnails.
 8. `UNUserNotificationCenter` crashes in a bare SwiftPM executable → always guard with `AppEnv.canNotify`.
 9. Closing the window must *hide* it (`WindowHider`/`MainWindow`), otherwise SwiftUI destroys it and the Dock icon can't reopen it.
+   Dock icon visibility (`Prefs.dockIconMode`) is applied only by `AppPresence.update()` (regular ↔ accessory policy);
+   call it after showing/hiding windows instead of calling `setActivationPolicy` directly.
 10. SwiftUI's multi-line `TextField` misbehaves on macOS → composer uses `GrowingTextView` (NSTextView). Heights are
    measured from the font, never hardcoded.
 11. `GMConstants.configVersion` and the Chrome UA mirror libgm's current values; bump them when libgm does.

@@ -1,0 +1,76 @@
+name: Installers
+
+# Runs the one-line install/update scripts against the real GitHub releases on each OS: fresh install, then a second
+# run that must report "up to date". Triggered when the scripts change, after a release is published, or by hand.
+on:
+  pull_request:
+    paths: ["scripts/install.sh", "scripts/install.ps1", ".github/workflows/installers.yml"]
+  push:
+    branches: [main]
+    paths: ["scripts/install.sh", "scripts/install.ps1", ".github/workflows/installers.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env: { GOOB_NO_LAUNCH: "1", GOOB_APP_DIR: "${{ github.workspace }}/apps" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (piped, like the README one-liner)
+        run: cat scripts/install.sh | bash
+      - name: Check
+        run: |
+          app="$GOOB_APP_DIR/Goob Message.app"
+          defaults read "$app/Contents/Info.plist" CFBundleShortVersionString
+          codesign --verify "$app"
+          lipo -archs "$app/Contents/MacOS/GMessagesMac"
+      - name: Second run is a no-op
+        run: cat scripts/install.sh | bash | tee out.txt && grep -q "up to date" out.txt
+
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The runner has no WebKitGTK/GStreamer (the check itself is in the release's install.sh). The token avoids the
+    # shared-runner API rate limit.
+    env: { GOOB_SKIP_DEPS: "1", GOOB_GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (piped, like the README one-liner)
+        run: cat scripts/install.sh | bash
+      - name: Check
+        run: |
+          test -x ~/.local/bin/goobmessages
+          test -f ~/.local/share/applications/goobmessages.desktop
+          grep -q "^Exec=$HOME/.local/bin/goobmessages" ~/.local/share/applications/goobmessages.desktop
+          cat ~/.local/share/goobmessages/installed-version
+      - name: Second run is a no-op
+        run: cat scripts/install.sh | bash | tee out.txt && grep -q "up to date" out.txt
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env: { GOOB_NO_LAUNCH: "1", GOOB_GITHUB_TOKEN: "${{ github.token }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install (Windows PowerShell 5.1, like the README one-liner)
+        shell: powershell
+        run: Get-Content -Raw scripts/install.ps1 | Invoke-Expression
+      - name: Check
+        shell: powershell
+        run: |
+          $p = @('HKCU:', 'HKLM:') | ForEach-Object { Get-ItemProperty "$_\Software\Microsoft\Windows\CurrentVersion\Uninstall\GoobMessagesGoobMessages" -ErrorAction SilentlyContinue } | Select-Object -First 1
+          if (-not $p) { throw 'not registered as installed' }
+          "Installed $($p.DisplayVersion) at $($p.DisplayIcon)"
+          if (-not (Test-Path $p.DisplayIcon.Trim('"'))) { throw 'executable missing' }
+      - name: Second run is a no-op
+        shell: powershell
+        run: |
+          $out = Get-Content -Raw scripts/install.ps1 | Invoke-Expression *>&1 | Out-String
+          $out
+          if ($out -notmatch 'up to date') { throw 'second run reinstalled' }

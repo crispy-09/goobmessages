@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.0
+### Added
+- **Run in the background:** Settings → General → *Show in Dock*: Always, Only while a window is open, or Never; plus
+  *Start in background* (connects and notifies at launch without opening the window). The app keeps running after you
+  close the window; ⌘Q quits.
+- **Menu bar icon opens the app** with one click; right-click (or ⌃-click) for unread chats, New Message, Settings, Quit.
+- **One-command install/update** for macOS, Linux and Windows (`scripts/install.sh`, `scripts/install.ps1`), and an
+  automated Mac release workflow.
+- New app icon matching the menu bar glyph.
+
+### Fixed
+- **"Connection problem" banner that never went away:** it was only cleared by a full reconnect, not when the
+  connection recovered by itself. It now clears on recovery (libgm `ListenRecovered`), missed updates are requested after
+  a gap of more than a minute, and both connection banners can be dismissed. The banner no longer covers the sidebar.
+- **Notification spam while everything loads:** backlog that keeps trickling in after a reconnect is held until it has
+  been quiet for a few seconds and summarised (never held more than 45 s), late old messages are batched too, and chats
+  the phone already reports as read don't alert. Connection errors now start a catch-up window.
+- No per-conversation lookups for unknown chats before the first conversation list has loaded.
+
 ## 1.1.0
 ### Fixed
 - **Notification flood after sleep.** Messages delivered in a burst when the Mac wakes (or after any reconnect) are now
